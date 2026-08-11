@@ -100,6 +100,19 @@ const Sync = (() => {
     return json.data;
   }
 
+  // يمسح كاش القراءة كله (مو طابور الحفظ ولا الجلسة). ضروري لما تتغيّر البيانات على
+  // الشيت من برا التطبيق — تصحيح يدوي، أو سكربت، أو صيانة — لأن القراءة cache-first
+  // فبيضل الجهاز عارض نسخته القديمة وما في شي بيخبره إنها بطلت صحيحة.
+  function clearReadCache() {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("ph_cache:")) keys.push(k);
+    }
+    keys.forEach(k => localStorage.removeItem(k));
+    return keys.length;
+  }
+
   // نداء مباشر بانتظار النتيجة — للأفعال اللي بدنا نعرف نتيجتها فوراً (متل اختبار الواتساب)
   // وإعادة المحاولة التلقائية إلها ما إلها معنى. مو للحفظ — الحفظ بيمر من enqueue.
   async function call(action, payload) {
@@ -148,5 +161,5 @@ const Sync = (() => {
   window.addEventListener("online", flushQueue);
   setInterval(flushQueue, 45000);
 
-  return { get, call, enqueue, flushQueue, getQueue, cacheGet, cacheSet, onStatusChange, emitStatus };
+  return { get, call, enqueue, flushQueue, getQueue, cacheGet, cacheSet, clearReadCache, onStatusChange, emitStatus };
 })();

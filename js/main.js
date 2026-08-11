@@ -138,7 +138,31 @@ function updateSyncBadge({ pending }) {
   }
 }
 Sync.onStatusChange(updateSyncBadge);
-document.getElementById("syncBadge").addEventListener("click", () => Sync.flushQueue());
+// ضغطة عادية: تدفع الحفظ المعلّق. ضغطة مطوّلة: تمسح الكاش وتعيد التحميل من السيرفر —
+// لازمة لما تتغيّر البيانات على الشيت من برا التطبيق، لأن القراءة cache-first فبيضل
+// الجهاز عارض نسخته القديمة بلا أي مؤشر إنها بطلت صحيحة.
+(function wireSyncBadge() {
+  const badge = document.getElementById("syncBadge");
+  let held = false, timer = null;
+
+  const startHold = () => {
+    held = false;
+    timer = setTimeout(() => {
+      held = true;
+      if (!confirm("تحديث كامل من السيرفر؟\nبينمسح المحفوظ محلياً وبتنجلب البيانات من جديد.")) return;
+      const n = Sync.clearReadCache();
+      showToast("انمسح " + n + " عنصر من الكاش — جاري التحديث…");
+      setTimeout(() => location.reload(), 600);
+    }, 900);
+  };
+  const endHold = () => { clearTimeout(timer); };
+
+  badge.addEventListener("mousedown", startHold);
+  badge.addEventListener("touchstart", startHold, { passive: true });
+  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach(ev => badge.addEventListener(ev, endHold));
+
+  badge.addEventListener("click", () => { if (!held) Sync.flushQueue(); });
+})();
 
 // ---- بانر أوفلاين ----
 function updateOfflineBanner() {
