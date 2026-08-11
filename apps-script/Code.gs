@@ -235,12 +235,6 @@ function doGet(e) {
     var action = e.parameter.action;
     if (action === 'login') throw new Error('سجّل الدخول عبر POST');
 
-    // نقطة صيانة مؤقتة — بمفتاح لمرة واحدة، قبل فحص الجلسة لأنها بتنشغّل من سطر الأوامر
-    if (action === 'maintenanceMoveDay') {
-      if (e.parameter.key !== MAINT_KEY) throw new Error('مفتاح صيانة غير صحيح');
-      return jsonOut({ ok: true, data: moveDayData_(e.parameter.apply !== '1') });
-    }
-
     var employee = requireSession_(e.parameter.token);
     var data;
     switch (action) {
@@ -1043,7 +1037,6 @@ function createDailyBackupTrigger() {
 // شغّل moveDayDataDryRun أول عشان تشوف الأرقام بدون أي تعديل،
 // وبعدها moveDayDataApply للتنفيذ الفعلي (بياخد نسخة احتياطية على Drive قبل ما يكتب).
 
-var MAINT_KEY = '23f79d7447063a2bf2447cf7c5ddd44371f283eaaff1e406';
 var MOVE_FROM    = '2026-08-11';        // الثلاثاء — فيه بيانات الأحد فعلياً
 var MOVE_TO      = '2026-08-09';        // الأحد — بياناته الحالية غلط وبتنمسح
 var MOVE_DELETE  = '2026-08-10';        // الإثنين — بياناته غلط وبتنمسح بالكامل
