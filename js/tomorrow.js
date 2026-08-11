@@ -130,7 +130,7 @@ function renderTomorrowView() {
         <div class="inputs-row">
           <div class="field">
             <label>الكمية المطلوبة</label>
-            <input type="number" inputmode="decimal" data-id="${item.id}" data-field="qty" value="${entry.qty}" ${ro}>
+            <input type="number" inputmode="decimal" min="0" step="any" data-id="${item.id}" data-field="qty" value="${entry.qty}" ${ro}>
           </div>
         </div>
         <div class="notes-row">
@@ -212,6 +212,14 @@ function onTomorrowFieldChange(e) {
   const id = e.target.dataset.id;
   const field = e.target.dataset.field;
   if (!currentTomorrowOrder[id]) currentTomorrowOrder[id] = { qty: "", notes: "" };
+
+  // كمية سالبة ما إلها معنى بطلبية، وكانت بتنحفظ وتوصل لشاشة الاستلام كـ"مطلوب: ‎-37‎".
+  // min="0" بالحقل ما بيكفي لأن المتصفح بيسمح بالكتابة المباشرة رغمه.
+  if (field === "qty" && e.target.value !== "" && Number(e.target.value) < 0) {
+    e.target.value = "";
+    showToast("الكمية ما بتكون بالسالب");
+  }
+
   currentTomorrowOrder[id][field] = e.target.value;
 
   const group = currentTomorrowGroups.find(g => g.items.some(it => it.id === id));

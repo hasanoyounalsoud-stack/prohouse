@@ -110,6 +110,16 @@ function renderReceivingView() {
         </div>
       </div>
 
+      ${(() => {
+        // بدون هالسطر ما في شي بالشاشة بيقول من وين جاي "المطلوب من المطبخ".
+        // الموظف بيعمل طلبية اليوم (محفوظة بتاريخ بكرا)، بيفتح الاستلام على اليوم،
+        // بيشوف أرقام طلبية أمس، وبيفتكر إن طلبيته ضاعت.
+        const orderedCount = Object.keys(currentReceivingOrdered || {}).length;
+        return orderedCount
+          ? `<div class="pin-note" style="margin:0 0 10px;">📋 «المطلوب من المطبخ» مأخوذ من طلبية <b>${currentReceivingDate}</b> — ${orderedCount} صنف.</div>`
+          : `<div class="offline-banner" style="margin:0 0 10px;">ما في طلبية محفوظة لتاريخ <b>${currentReceivingDate}</b> بهذا الفرع. الطلبية اللي بتعملها اليوم بتنحفظ لتاريخ الغد وبتظهر هون بكرا.</div>`;
+      })()}
+
       <div class="receiving-kpi-grid">
         <div class="kpi-card">
           <div class="kpi-v">${totalItemsCount}</div>

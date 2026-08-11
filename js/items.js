@@ -113,7 +113,12 @@ function renderItemsAdminView() {
     return b.length === 1 && mine.includes(b[0]);
   });
 
-  const cats = [...new Set(Items.current.map(it => it.category).filter(Boolean))].sort((a, b) => categoryRank(a) - categoryRank(b));
+  // التصنيفات المضبوطة بالإعدادات + المستخدمة فعلاً بالأصناف.
+  // الاعتماد على المستخدمة وحدها كان بيعمل حلقة مقفلة: تصنيف مضبوط بالإعدادات (متل "لحم")
+  // ما بيظهر بالقائمة لأنه ما في صنف فيه بعد، والطريقة الوحيدة لإنشائه تكون بكتابته يدوياً
+  // بـ"+ تصنيف جديد" — وأي خطأ إملائي بيولّد تصنيف شبيه بيكسر حساب الوجبات وترتيب الشاشات.
+  const cats = [...new Set([...categoryOrderList(), ...Items.current.map(it => it.category)].filter(Boolean))]
+    .sort((a, b) => categoryRank(a) - categoryRank(b));
 
   view.innerHTML = `
     ${!isOwner ? '<div class="offline-banner">هون بس الأصناف اللي ضفتها إلك لفرعك — الكتالوج المشترك بيديره المالك</div>' : ""}
