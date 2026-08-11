@@ -26,6 +26,7 @@ var SHEET_NAMES = {
   EMPLOYEES: 'Employees',
   SESSIONS: 'Sessions',
   TABSENSE: 'TabsenseSales',
+  WASTE: 'WasteLog',
   JUICES: 'Juices',
   JUICE_COUNTS: 'JuiceCounts',
   JUICE_SALES: 'JuiceSales',
@@ -43,6 +44,7 @@ var SHEET_HEADERS = {
   Employees: ['name', 'active', 'id', 'pin', 'role', 'branches'],
   Sessions: ['token', 'employeeId', 'createdAt', 'expiresAt'],
   TabsenseSales: ['date', 'branch', 'category', 'qty', 'importedAt'],
+  WasteLog: ['date', 'branch', 'id', 'itemId', 'itemName', 'unit', 'qty', 'reason', 'notes', 'employeeName', 'timestamp', 'savedAt'],
   Juices: ['id', 'name', 'unit', 'tabsenseName', 'branches', 'active', 'sortOrder', 'updatedAt'],
   JuiceCounts: ['date', 'branch', 'juiceId', 'juiceName', 'unit', 'opening', 'added', 'sold', 'counted', 'notes', 'employeeName', 'savedAt'],
   JuiceSales: ['date', 'branch', 'productName', 'qty', 'importedAt'],
@@ -230,6 +232,7 @@ function seedInitialDataIfEmpty() {
   }
 }
 
+
 function doGet(e) {
   try {
     var action = e.parameter.action;
@@ -257,6 +260,10 @@ function doGet(e) {
         data = getEmployees();
         break;
       case 'getSettings': data = getSettingsForClient_(employee); break;
+      case 'getWasteReport':
+        requireBranchAccess_(employee, e.parameter.branch);
+        data = getWasteReport(e.parameter.date, e.parameter.branch);
+        break;
       case 'getJuices': data = getJuices(e.parameter.all === '1'); break;
       case 'getJuiceDay':
         requireBranchAccess_(employee, e.parameter.branch);
@@ -333,6 +340,11 @@ function doPost(e) {
         if (employee.role === 'chef') throw new Error('غير مصرح — الشيف يشوف بس');
         requireBranchAccess_(employee, body.payload.branch);
         data = saveTomorrowOrder(body.payload);
+        break;
+      case 'saveWasteReport':
+        if (employee.role === 'chef') throw new Error('غير مصرح — الشيف يشوف بس');
+        requireBranchAccess_(employee, body.payload.branch);
+        data = saveWasteReport(body.payload);
         break;
       case 'saveJuice':
         requireJuiceWriteAccess_(employee, body.payload);
@@ -799,6 +811,34 @@ function getSalesByCategory(start, end, branch) {
   return readRows(SHEET_NAMES.TABSENSE).rows.filter(function (r) {
     return r.date >= start && r.date <= end && r.branch === branch;
   });
+}
+
+// ==================== سجل الهدر والفاقد ====================
+// شاشة الهدر كانت بتنادي هالفعلين وهما مش موجودين إطلاقاً بالباك اند: القراءة كانت
+// بترجع فاضي، والحفظ كان بيفشل كل مرة ويوقف طابور المزامنة كله معه — فما بيوصل ولا
+// حفظ بعده للسيرفر، بما فيه الاستلام.
+
+function getWasteReport(date, branch) {
+  var items = readRows(SHEET_NAMES.WASTE).rows
+    .filter(function (r) { return r.date === date && r.branch === branch; });
+  return { date: date, branch: branch, items: items };
+}
+
+function saveWasteReport(p) {
+  // استبدال كامل لنفس اليوم والفرع — الواجهة بتبعت القائمة كاملة كل مرة
+  deleteRowsWhere(SHEET_NAMES.WASTE, function (row) {
+    return row.date === p.date && row.branch === p.branch;
+  });
+  var savedAt = nowIso();
+  (p.items || []).forEach(function (it) {
+    appendRow(SHEET_NAMES.WASTE, {
+      date: p.date, branch: p.branch, id: it.id || '',
+      itemId: it.itemId || '', itemName: it.itemName || '', unit: it.unit || '',
+      qty: it.qty, reason: it.reason || '', notes: it.notes || '',
+      employeeName: it.employeeName || '', timestamp: it.timestamp || '', savedAt: savedAt
+    });
+  });
+  return { date: p.date, branch: p.branch, count: (p.items || []).length, savedAt: savedAt };
 }
 
 // ==================== جرد العصيرات ====================

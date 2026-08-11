@@ -5,6 +5,7 @@
 const Sync = (() => {
   const QUEUE_KEY = "ph_pending_queue";
   const listeners = [];
+  let lastReadError = null;
 
   function onStatusChange(fn) { listeners.push(fn); }
   function emitStatus() {
@@ -54,8 +55,17 @@ const Sync = (() => {
         if (onFresh) onFresh(json.data);
         return json.data;
       } catch (e) {
-        if (e.name !== "AbortError") {
-          console.debug("Sync.get background fetch note:", action, e.message || e);
+        // انقطاع الشبكة متوقّع ومغطّى بالكاش — ما بنزعج المستخدم فيه.
+        // أما لو السيرفر رد برفض (صلاحية، فعل غير معروف، خطأ داخلي) فهاد عطل حقيقي:
+        // ابتلاعه بصمت بيخلي الشاشة تطلع فاضية بلا سبب ظاهر، وهاد أسوأ من رسالة خطأ.
+        const offline = e.name === "AbortError" || e.name === "TypeError" || !navigator.onLine;
+        if (!offline) {
+          const msg = String(e.message || e).replace(/^(Error:\s*)+/, "");
+          console.error("فشل قراءة " + action + ": " + msg);
+          lastReadError = { action, msg, at: Date.now() };
+          if (typeof showToast === "function") showToast("⚠ " + action + ": " + msg);
+        } else {
+          console.debug("Sync.get offline note:", action, e.message || e);
         }
         return null;
       }
@@ -149,8 +159,23 @@ const Sync = (() => {
         } catch (e) {
           item.attempts += 1;
           item.lastError = String(e);
+
+          // فشل دائم (فعل غير معروف، صلاحية) بيتكرر بنفس السبب للأبد. الوقوف عنده كان
+          // بيجمّد الطابور كله فما بيوصل ولا حفظ بعده للسيرفر — حصل فعلاً مع saveWasteReport
+          // وحجب حفظ الاستلام معه. هلأ منعزله ومنكمّل، ومنبلّغ المستخدم مرة وحدة.
+          const msg = String(e.message || e);
+          const permanent = /unknown action|غير مصرح|لازم تحدد/.test(msg);
+
+          if (permanent && item.attempts >= 2) {
+            q = q.filter(x => x.id !== item.id);
+            setQueue(q);
+            console.error("انحذف من الطابور لفشل دائم:", item.action, msg);
+            if (typeof showToast === "function") showToast("⚠ تعذّر حفظ " + item.action + " — " + msg.replace(/^(Error:\s*)+/, ""));
+            continue; // نكمّل باقي الطابور بدل ما نجمّده
+          }
+
           setQueue(q);
-          break; // نوقف باقي الطابور — غالباً السبب انقطاع نت/سيرفر
+          break; // فشل مؤقت (نت/سيرفر) — نوقف ونعيد المحاولة لاحقاً بنفس الترتيب
         }
       }
     } finally {
@@ -161,5 +186,5 @@ const Sync = (() => {
   window.addEventListener("online", flushQueue);
   setInterval(flushQueue, 45000);
 
-  return { get, call, enqueue, flushQueue, getQueue, cacheGet, cacheSet, clearReadCache, onStatusChange, emitStatus };
+  return { get, call, enqueue, flushQueue, getQueue, cacheGet, cacheSet, clearReadCache, onStatusChange, emitStatus, getLastReadError: () => lastReadError };
 })();
