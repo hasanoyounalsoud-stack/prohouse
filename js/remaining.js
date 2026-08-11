@@ -158,10 +158,28 @@ function renderRemainingView(receivingData, salesData) {
   // بناء كروت التصنيفات الملخصة
   let catHtml = "";
 
+function getMatchedCategorySales(salesMap, cat) {
+  if (!salesMap || !cat) return 0;
+  let total = Number(salesMap[cat] || 0);
+  
+  const normCat = String(cat).trim();
+  Object.keys(salesMap).forEach(key => {
+    if (key === cat) return;
+    const k = String(key).trim();
+    if ((normCat.includes("دجاج") && k.includes("دجاج")) ||
+        (normCat.includes("لحم") && k.includes("لحم")) ||
+        ((normCat.includes("بحري") || normCat.includes("سمك")) && (k.includes("بحري") || k.includes("سمك"))) ||
+        ((normCat.includes("فطور") || normCat.includes("ساندويتش")) && (k.includes("فطور") || k.includes("ساندويتش")))) {
+      total += Number(salesMap[key] || 0);
+    }
+  });
+  return total;
+}
+
   categories.forEach(cat => {
     const catItems = byCat[cat];
     const isMealCat = isMealMatchingCategory(cat);
-    const categorySoldMeals = isMealCat ? (salesMap[cat] || 0) : 0;
+    const categorySoldMeals = isMealCat ? getMatchedCategorySales(salesMap, cat) : 0;
     const categoryConsumedGrams = categorySoldMeals * MEAL_WEIGHT_G; // 150g لكل وجبة
     
     let catReceivedSum = 0;

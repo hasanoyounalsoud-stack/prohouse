@@ -245,6 +245,33 @@ async function run() {
         else mappedRows.push({ category: UMM_ALI_TARGET_CATEGORY, qty: sandwichesFromUmmAli });
       }
 
+      // احتياط: إذا كان جدول التصنيفات فارغاً أو ناقصاً، نستخرج مبيعات التصنيفات من جدول المنتجات التفصيلي مباشرة
+      if (products && products.length) {
+        console.log(`ℹ️ جاري مطابقة مبيعات ${products.length} منتج مع التصنيفات الرئيسية...`);
+        products.forEach(p => {
+          const pCat = p.category || "";
+          const pName = p.name || "";
+          const pCatNorm = normalizeArabic(pCat).toLowerCase();
+          const pNameNorm = normalizeArabic(pName).toLowerCase();
+          
+          let targetCat = CATEGORY_MAP[pCat];
+          if (!targetCat) {
+            if (pCatNorm.includes("دجاج") || pNameNorm.includes("دجاج") || pNameNorm.includes("chicken")) targetCat = "دجاج";
+            else if (pCatNorm.includes("لحم") || pNameNorm.includes("لحم") || pNameNorm.includes("meat")) targetCat = "لحم";
+            else if (pCatNorm.includes("بحري") || pCatNorm.includes("سمك") || pNameNorm.includes("بحري") || pNameNorm.includes("سمك") || pNameNorm.includes("fish")) targetCat = "بحري";
+            else if (pCatNorm.includes("فطور") || pCatNorm.includes("ساندويتش") || pNameNorm.includes("ساندويتش") || pNameNorm.includes("فطور")) targetCat = "ساندويتشات";
+          }
+          if (targetCat && p.qty > 0) {
+            const hasFromCategoryTable = categoryRows.some(r => CATEGORY_MAP[r.category] === targetCat);
+            if (!hasFromCategoryTable) {
+              const existing = mappedRows.find(m => m.category === targetCat);
+              if (existing) existing.qty += p.qty;
+              else mappedRows.push({ category: targetCat, qty: p.qty });
+            }
+          }
+        });
+      }
+
       if (!mappedRows.length) {
         console.warn(`⚠️ تحذير: جدول مبيعات تابسنس المستخرج فارغ أو يحتوي على رسالة عدم وجود بيانات لفرع ${config.branch} في تاريخ ${iso}`);
         throw new Error("لم يتم العثور على مبيعات في تابسنس لهذا اليوم — تأكد من التاريخ وتوفر المبيعات بالجدول");

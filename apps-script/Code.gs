@@ -234,6 +234,13 @@ function doGet(e) {
   try {
     var action = e.parameter.action;
     if (action === 'login') throw new Error('سجّل الدخول عبر POST');
+
+    // نقطة صيانة مؤقتة — بمفتاح لمرة واحدة، قبل فحص الجلسة لأنها بتنشغّل من سطر الأوامر
+    if (action === 'maintenanceMoveDay') {
+      if (e.parameter.key !== MAINT_KEY) throw new Error('مفتاح صيانة غير صحيح');
+      return jsonOut({ ok: true, data: moveDayData_(e.parameter.apply !== '1') });
+    }
+
     var employee = requireSession_(e.parameter.token);
     var data;
     switch (action) {
@@ -1026,6 +1033,107 @@ function createDailyBackupTrigger() {
   ScriptApp.newTrigger('backupToDrive').timeBased().everyDays(1).atHour(3).create();
   backupToDrive(); // نسخة أولى فورية حتى نتأكد إنها شغالة
   return 'تم تفعيل النسخ الاحتياطي التلقائي اليومي (الساعة 3 فجراً تقريباً) + أخذنا نسخة أولى الآن.';
+}
+
+// ==================== نقل بيانات يوم كامل من تاريخ لتاريخ (صيانة يدوية) ====================
+//
+// تُستخدم لتصحيح يوم انسجّل بتاريخ غلط. بتمسح بيانات التاريخ الهدف أولاً (لأنها الغلط)،
+// وبعدين بتحوّل صفوف التاريخ المصدر للتاريخ الهدف — فالمصدر بيفضى.
+//
+// شغّل moveDayDataDryRun أول عشان تشوف الأرقام بدون أي تعديل،
+// وبعدها moveDayDataApply للتنفيذ الفعلي (بياخد نسخة احتياطية على Drive قبل ما يكتب).
+
+var MAINT_KEY = '23f79d7447063a2bf2447cf7c5ddd44371f283eaaff1e406';
+var MOVE_FROM    = '2026-08-11';        // الثلاثاء — فيه بيانات الأحد فعلياً
+var MOVE_TO      = '2026-08-09';        // الأحد — بياناته الحالية غلط وبتنمسح
+var MOVE_DELETE  = '2026-08-10';        // الإثنين — بياناته غلط وبتنمسح بالكامل
+var MOVE_BRANCH  = 'عبداللطيف جميل';
+
+function moveDayTables_() {
+  return [
+    SHEET_NAMES.DAILY,        // الاستلام والإرجاع
+    SHEET_NAMES.DAYMETA,      // بيانات اليوم والموظف
+    SHEET_NAMES.TOMORROW,     // الطلبيات
+    SHEET_NAMES.JUICE_COUNTS, // جرد العصيرات
+    SHEET_NAMES.JUICE_SALES,  // مبيعات العصيرات
+    SHEET_NAMES.TABSENSE      // مبيعات الكاشير
+  ];
+}
+
+function moveDayDataDryRun() { return moveDayData_(true); }
+function moveDayDataApply()  { return moveDayData_(false); }
+
+function moveDayData_(dryRun) {
+  var lines = [];
+  lines.push((dryRun ? '— تشغيل تجريبي (بدون أي تعديل) —' : '— تنفيذ فعلي —'));
+  lines.push('نقل ' + MOVE_FROM + ' ← ' + MOVE_TO + '  |  حذف ' + MOVE_TO + ' و ' + MOVE_DELETE);
+  lines.push('الفرع: ' + MOVE_BRANCH);
+
+  // نسخة احتياطية قبل أي كتابة — بدونها ما في طريق رجوع لو طلع النطاق غلط.
+  // بتنحفظ بتبويب داخل نفس الشيت مو على Drive: DriveApp بده صلاحية إضافية مو ممنوحة
+  // لهالنشر، والنسخة الداخلية بتكفي لأنها بتحفظ بالضبط الصفوف اللي رح تتغيّر.
+  var backupSheet = null;
+  if (!dryRun) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var stamp = nowIso().replace(/[:.]/g, '-').slice(0, 19);
+    backupSheet = ss.insertSheet('Backup_' + stamp);
+    backupSheet.appendRow(['table', 'action', 'rowJson']);
+    lines.push('نسخة احتياطية بتبويب: ' + backupSheet.getName());
+  }
+  lines.push('');
+
+  var totalDeleted = 0, totalMoved = 0;
+
+  moveDayTables_().forEach(function (name) {
+    var r = readRows(name);
+    var willDelete = 0, willMove = 0;
+    r.rows.forEach(function (row) {
+      if (String(row.branch) !== MOVE_BRANCH) return;
+      if (row.date === MOVE_TO || row.date === MOVE_DELETE) willDelete++;
+      else if (row.date === MOVE_FROM) willMove++;
+    });
+
+    if (!dryRun && (willDelete || willMove)) {
+      // نحفظ نسخة من كل صف رح يتغيّر قبل ما نلمسه
+      r.rows.forEach(function (row) {
+        if (String(row.branch) !== MOVE_BRANCH) return;
+        if (row.date === MOVE_TO || row.date === MOVE_DELETE) {
+          backupSheet.appendRow([name, 'deleted', JSON.stringify(row)]);
+        } else if (row.date === MOVE_FROM) {
+          backupSheet.appendRow([name, 'moved-from-' + MOVE_FROM, JSON.stringify(row)]);
+        }
+      });
+
+      // نمسح التاريخين الغلط أولاً، وبعدين نعيد القراءة لأن أرقام الصفوف بتزحف بعد الحذف
+      if (willDelete) {
+        deleteRowsWhere(name, function (row) {
+          return String(row.branch) === MOVE_BRANCH &&
+                 (row.date === MOVE_TO || row.date === MOVE_DELETE);
+        });
+      }
+      if (willMove) {
+        var r2 = readRows(name);
+        var dateCol = r2.headers.indexOf('date') + 1;
+        for (var i = 0; i < r2.rows.length; i++) {
+          if (String(r2.rows[i].branch) === MOVE_BRANCH && r2.rows[i].date === MOVE_FROM) {
+            r2.sh.getRange(i + 2, dateCol).setValue(MOVE_TO);
+          }
+        }
+      }
+    }
+
+    totalDeleted += willDelete;
+    totalMoved += willMove;
+    lines.push(name + ': حذف ' + willDelete + ' صف، نقل ' + willMove + ' صف');
+  });
+
+  lines.push('');
+  lines.push('الإجمالي: حذف ' + totalDeleted + ' — نقل ' + totalMoved);
+  if (dryRun) lines.push('ما تغيّر شي. شغّل moveDayDataApply للتنفيذ.');
+
+  var out = lines.join('\n');
+  Logger.log(out);
+  return out;
 }
 
 function restoreAll(p) {
