@@ -66,7 +66,7 @@ var EMPLOYEE_ROSTER = {
   'الشيف عصام': { role: 'chef', branches: '' },
   'أبو يونس': { role: 'manager', branches: 'الروضة,الشاطئ' },
   'العامودي': { role: 'manager', branches: 'الشاطئ' },
-  'عبدالهادي': { role: 'manager', branches: 'عبداللطيف جميل' },
+  'محمد البلول': { role: 'manager', branches: 'عبداللطيف جميل' },
   'غالب': { role: 'employee', branches: 'عبداللطيف جميل' }
 };
 

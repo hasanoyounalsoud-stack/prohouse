@@ -131,24 +131,55 @@ async function showBranchControlCenterModal(branch) {
   modal.classList.add("active");
 }
 
-// ---- مسار افتتاح الفرع (Opening Session Workflow) ----
+// ---- مراحل التوثيق الميداني الثلاث لبرو هاوس ----
+const INSPECTION_STAGES = [
+  { id: "morning", name: "الجولة 1: الافتتاح الصباحي", time: "08:00 ص", icon: "🌅", targetHour: 8, targetMin: 0 },
+  { id: "lunch", name: "الجولة 2: ذروة الغداء والجاهزية", time: "12:00 م", icon: "☀️", targetHour: 12, targetMin: 0 },
+  { id: "closing", name: "الجولة 3: الإغلاق واقتناع الفرع", time: "04:30 م", icon: "🔒", targetHour: 16, targetMin: 30 }
+];
+
+let currentInspectionStage = "morning";
+
+// اختيار المرحلة التلقائي الذكي بناء على الوقت الحالي
+function getAutoInspectionStage() {
+  const now = new Date();
+  const mins = now.getHours() * 60 + now.getMinutes();
+  if (mins < 11 * 60) return "morning";        // قبل 11:00 صباحاً -> الافتتاح
+  if (mins < 15 * 60 + 30) return "lunch";     // بين 11:00 و 3:30 عصراً -> الغداء
+  return "closing";                            // بعد 3:30 عصراً -> الإغلاق
+}
+
 async function renderOpeningView() {
   const view = document.getElementById("openingView");
   if (!view) return;
 
   const branch = Branch.get() || allowedBranchList()[0] || "";
   const date = todayStr();
-  const sessionId = "OPN-" + branch.replace(/\s+/g, "_") + "-" + date.replace(/-/g, "") + "-001";
+  const activeStage = INSPECTION_STAGES.find(s => s.id === currentInspectionStage) || INSPECTION_STAGES[0];
+  const sessionId = "INSP-" + branch.replace(/\s+/g, "_") + "-" + date.replace(/-/g, "") + "-" + activeStage.id.toUpperCase();
 
   const photos = await getPhotosForSession(sessionId);
-  const photosCount = photos.length;
+  const checkpoints = typeof getCheckpointsForBranch === "function" ? getCheckpointsForBranch(branch) : DEFAULT_INSPECTION_CHECKPOINTS;
+  const completedCount = checkpoints.filter(cp => photos.some(p => p.checkpointId === cp.id)).length;
+  const isFullyCompleted = completedCount >= checkpoints.length && checkpoints.length > 0;
+
+  // جلب إحصائيات كل جولة لمعرفة المكتمل منها
+  const morningPhotos = await getPhotosForSession("INSP-" + branch.replace(/\s+/g, "_") + "-" + date.replace(/-/g, "") + "-MORNING");
+  const lunchPhotos = await getPhotosForSession("INSP-" + branch.replace(/\s+/g, "_") + "-" + date.replace(/-/g, "") + "-LUNCH");
+  const closingPhotos = await getPhotosForSession("INSP-" + branch.replace(/\s+/g, "_") + "-" + date.replace(/-/g, "") + "-CLOSING");
+
+  const stageStats = {
+    morning: checkpoints.filter(cp => morningPhotos.some(p => p.checkpointId === cp.id)).length,
+    lunch: checkpoints.filter(cp => lunchPhotos.some(p => p.checkpointId === cp.id)).length,
+    closing: checkpoints.filter(cp => closingPhotos.some(p => p.checkpointId === cp.id)).length
+  };
 
   let html = `
     <div class="opening-panel">
       <div class="opening-header">
         <div>
-          <h2>🌅 افتتاح الفرع والجاهزية الصباحية</h2>
-          <div class="sub-text">رقم جلسة الافتتاح: <strong>${sessionId}</strong></div>
+          <h2>📷 التوثيق البصري والمراقبة الميدانية (3 مراحل يومياً)</h2>
+          <div class="sub-text">فرع: <strong>${branch}</strong> | التاريخ: <strong>${date}</strong></div>
         </div>
         <div class="branch-selector-wrap">
           <select onchange="onOpeningBranchChange(this.value)">
@@ -157,20 +188,50 @@ async function renderOpeningView() {
         </div>
       </div>
 
+      <!-- تبويبات المراحل الثلاث للتوثيق -->
+      <div class="stage-nav-tabs">
+        ${INSPECTION_STAGES.map(stg => {
+          const isAct = stg.id === currentInspectionStage;
+          const count = stageStats[stg.id] || 0;
+          const isDone = count >= checkpoints.length && checkpoints.length > 0;
+          return `
+            <button class="stage-tab-btn ${isAct ? 'active' : ''} ${isDone ? 'completed' : ''}" onclick="switchInspectionStage('${stg.id}')">
+              <span class="stage-tab-icon">${stg.icon}</span>
+              <div class="stage-tab-text">
+                <strong>${stg.name}</strong>
+                <span class="stage-tab-time">⏰ الموعد: ${stg.time} (${count}/${checkpoints.length})</span>
+              </div>
+              ${isDone ? '<span class="stage-badge-ok">✓ مكتمل</span>' : ''}
+            </button>
+          `;
+        }).join("")}
+      </div>
+
       <div class="opening-checkpoints-card">
-        <h3>📷 الفحص البصري لإعدادات مدخل ومطبخ الفرع</h3>
+        <div class="stage-header-banner">
+          <div>
+            <h3>${activeStage.icon} نقاط الفحص المطلوبة: ${activeStage.name}</h3>
+            <span class="sub-text">توثيق جاهزية الفرع بالكاميرا — المتبقي: ${checkpoints.length - completedCount} منطقة</span>
+          </div>
+          <div class="stage-progress-pill ${isFullyCompleted ? 'ok' : ''}">
+            ${completedCount} / ${checkpoints.length} مناطق موثقة
+          </div>
+        </div>
+
         <div class="checkpoints-grid">
-          ${DEFAULT_INSPECTION_CHECKPOINTS.map(cp => {
-            const hasPhoto = photos.some(p => p.checkpointId === cp.id);
+          ${checkpoints.map(cp => {
+            const photo = photos.find(p => p.checkpointId === cp.id);
+            const hasPhoto = !!photo;
             return `
               <div class="checkpoint-item-box ${hasPhoto ? 'done' : ''}">
                 <div class="cp-icon">${cp.icon}</div>
                 <div class="cp-info">
                   <strong>${cp.name}</strong>
                   <span class="cp-status">${hasPhoto ? '✓ تم التوثيق بنجاح' : 'مطلوب التوثيق 📷'}</span>
+                  ${photo ? `<div class="cp-time">🕒 ${new Date(photo.timestamp).toLocaleTimeString("ar-SA", { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
                 </div>
-                <button class="btn primary snap-cp-btn" onclick="snapCheckpointPhoto('${sessionId}', '${cp.id}', '${cp.name}')">
-                  ${hasPhoto ? 'إعادة التصوير' : '📷 تصوير'}
+                <button class="btn ${hasPhoto ? 'secondary' : 'primary'} snap-cp-btn" onclick="snapCheckpointPhoto('${sessionId}', '${cp.id}', '${cp.name}')">
+                  ${hasPhoto ? '📷 إعادة التصوير' : '📷 تصوير'}
                 </button>
               </div>
             `;
@@ -178,15 +239,20 @@ async function renderOpeningView() {
         </div>
       </div>
 
-      <div style="text-align:center;margin-top:20px;">
-        <button class="btn gold" style="font-size:16px;padding:14px 32px;" onclick="completeBranchOpening('${sessionId}')">
-          ✓ اعتماد وتأكيد جاهزية الفرع للافتتاح
+      <div style="text-align:center;margin-top:24px;">
+        <button class="btn ${isFullyCompleted ? 'gold' : 'secondary'}" style="font-size:16px;padding:15px 36px;" onclick="completeInspectionStage('${sessionId}', '${activeStage.name}')">
+          ✓ اعتماد وتأكيد ${activeStage.name}
         </button>
       </div>
     </div>
   `;
 
   view.innerHTML = html;
+}
+
+function switchInspectionStage(stageId) {
+  currentInspectionStage = stageId;
+  renderOpeningView();
 }
 
 function onOpeningBranchChange(branch) {
@@ -202,9 +268,12 @@ function snapCheckpointPhoto(sessionId, cpId, cpName) {
   });
 }
 
-function completeBranchOpening(sessionId) {
-  showToast("✅ تم اعتماد افتتاح وجاهزية الفرع بنجاح!");
-  setActiveTab("dashboard");
+function completeInspectionStage(sessionId, stageName) {
+  showToast(`✅ تم اعتماد وتوثيق ${stageName} بنجاح!`);
+  // إذا كانت مرحلة الإغلاق، نقترح الانتقال للمتبقي
+  if (currentInspectionStage === "closing") {
+    setTimeout(() => setActiveTab("remaining"), 800);
+  }
 }
 
 // ---- مسار إغلاق الفرع (Closing Session Workflow) ----

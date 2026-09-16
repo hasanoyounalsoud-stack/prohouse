@@ -13,9 +13,9 @@ const TAB_ROLE_ACCESS = {
   checklist: ["owner", "manager", "chef", "employee"],
   waste: ["owner", "manager", "chef", "employee"],
   report: ["owner", "manager", "chef"],
-  items: ["owner", "manager", "employee"],
-  users: ["owner", "manager"],
-  audit: ["owner", "manager"],
+  items: ["owner"],
+  users: ["owner"],
+  audit: ["owner"],
   settings: ["owner"]
 };
 
@@ -107,15 +107,24 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("sidebarBackdrop")?.addEventListener("click", closeMobileSidebar);
 });
 
-// يخفي التابات الممنوعة حسب دور المستخدم المسجّل دخول
 function applyRoleUiGating() {
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.classList.toggle("hidden", !tabAllowed(btn.dataset.tab));
   });
+
+  // إخفاء قسم "النظام والأمان" بالكامل عن الموظفين والمدراء
+  const isOwner = Auth.isOwner();
+  const sysGroup = document.querySelector(".nav-group-title:last-of-type");
+  if (sysGroup && !isOwner) {
+    sysGroup.style.display = "none";
+  } else if (sysGroup) {
+    sysGroup.style.display = "";
+  }
+
   const emp = Auth.getEmployee();
-  const roleLabel = { owner: "مالك", manager: "مدير فرع", chef: "شيف", employee: "موظف" };
   document.getElementById("userBarName").textContent = emp ? emp.name : "";
-  document.getElementById("userBarRole").textContent = emp ? (roleLabel[emp.role] || emp.role) : "";
+  const roleEl = document.getElementById("userBarRole");
+  if (roleEl) roleEl.textContent = "";
   document.getElementById("userBar").classList.remove("hidden");
 }
 
