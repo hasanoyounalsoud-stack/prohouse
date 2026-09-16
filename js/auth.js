@@ -30,6 +30,17 @@ const Auth = (() => {
   }
 
   async function login(pin) {
+    if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
+      try {
+        const res = await SupaEngine.login(pin);
+        setSession(res.token, res.employee);
+        return res.employee;
+      } catch (err) {
+        console.warn("Supabase login fallback check:", err);
+        throw err;
+      }
+    }
+
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -41,9 +52,15 @@ const Auth = (() => {
     return json.data.employee;
   }
 
-  // مو عبر طابور المزامنة عن قصد: لازم نعرف النتيجة فوراً، وإعادة المحاولة تلقائياً برقم
-  // سري غلط ما إلها معنى. وبما إن السيرفر بيلغي كل الجلسات بعد التغيير، لازم دخول جديد.
   async function changePin(currentPin, newPin) {
+    if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
+      const emp = getEmployee();
+      if (!emp) throw new Error("لا يوجد جلسة نشطة");
+      await SupaEngine.changePin(emp, { currentPin, newPin });
+      clearSession();
+      return true;
+    }
+
     if (!API_URL) throw new Error("الباك اند مو مربوط");
     const res = await fetch(API_URL, {
       method: "POST",
@@ -70,8 +87,47 @@ const Auth = (() => {
   }
 
   // بتتحقق من الجلسة عالسيرفر (مرة وحدة وقت الإقلاع) وبتحدّث بيانات الموظف محلياً
-  // (مفيد لو الدور أو الفروع تغيّرت من المالك). لو فشل التحقق بسبب نت، بتكمل بالجلسة المحفوظة.
   async function verify() {
+    const token = getToken();
+    if (!token) return false;
+
+    if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
+      try {
+        // التحقق صار عبر دالة verify_session بالداتابيس — جدول الجلسات نفسه
+        // ما عاد قابل للقراءة المباشرة من المتصفح
+        const res = await fetch(SUPABASE_URL + "/rest/v1/rpc/verify_session", {
+          method: "POST",
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ p_token: token })
+        });
+        const emp = res.ok ? await res.json() : null;
+
+        if (emp && emp.id) {
+          const formatted = {
+            id: emp.id,
+            name: emp.name,
+            role: emp.role,
+            branches: (emp.branches || "").split(",").map(s => s.trim()).filter(Boolean)
+          };
+          setSession(token, formatted);
+          return true;
+        }
+        if (res.ok) {
+          // السيرفر رد بوضوح: الجلسة القديمة ما عادت صالحة (مثلاً تسجيل دخول من
+          // النظام القديم) — منمسحها وبنطلب دخول من جديد بدل شاشات فاضية
+          clearSession();
+          return false;
+        }
+      } catch (err) {
+        console.warn("Supabase verify fallback to local:", err);
+      }
+      return isLoggedIn();
+    }
+
     if (!API_URL || !getToken()) return isLoggedIn();
     try {
       const qs = new URLSearchParams({ action: "me", token: getToken() }).toString();
@@ -81,7 +137,7 @@ const Auth = (() => {
       setSession(getToken(), json.data);
       return true;
     } catch (e) {
-      return isLoggedIn(); // ما في نت — نكمل بالجلسة المحفوظة محلياً
+      return isLoggedIn();
     }
   }
 

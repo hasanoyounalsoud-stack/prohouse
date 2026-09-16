@@ -72,7 +72,24 @@ function getTargetDates() {
 }
 
 function normalizeArabic(s) {
-  return String(s || "").replace(/[أإآ]/g, "ا").trim();
+  return String(s || "").replace(/[إأآ]/g, "ا").trim();
+}
+
+// إرسال لـ Supabase (اختياري): إذا كانت مفاتيح supabaseUrl/supabaseToken موجودة
+// بـ config.json بينبعث الملف نفسه للنظام الجديد كمان — الشيت بيضل يتحدث عادي.
+async function sendToSupabase(rpcName, iso, branch, rows) {
+  if (!config.supabaseUrl || !config.supabaseToken) return false;
+  const url = String(config.supabaseUrl).replace(/\/$/, "") + "/rest/v1/rpc/" + rpcName;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ p_token: config.supabaseToken, p_date: iso, p_branch: branch, p_rows: rows })
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error("Supabase " + rpcName + " فشل [" + res.status + "]: " + t.slice(0, 200));
+  }
+  return true;
 }
 
 async function prepareReportPageAndSetDate(page, reportUrl, dateDisplay) {
@@ -291,6 +308,16 @@ async function run() {
       const json = await res.json();
       if (!json.ok) throw new Error("رفض السيرفر البيانات: " + json.error);
 
+      // نفس البيانات للنظام الجديد (Supabase) إذا كان مربوطاً
+      if (config.supabaseUrl && config.supabaseToken) {
+        try {
+          await sendToSupabase("import_sales", iso, config.branch, mappedRows);
+          console.log("☁️ تم تحديث مبيعات التصنيفات على Supabase أيضاً.");
+        } catch (supaErr) {
+          console.warn("⚠ تعذر تحديث Supabase (مبيعات التصنيفات):", supaErr.message);
+        }
+      }
+
       // ---- 4) مبيعات العصيرات (لصفحة جرد العصيرات) ----
       const juiceRows = pickJuiceRows(products, config.juiceCategories || DEFAULT_JUICE_CATEGORIES);
       if (juiceRows.length) {
@@ -307,6 +334,15 @@ async function run() {
         const juiceJson = await juiceRes.json();
         if (!juiceJson.ok) console.warn("⚠ فشل إرسال مبيعات العصيرات:", juiceJson.error);
         else console.log("🥤 تم إرسال مبيعات العصيرات:", juiceRows);
+
+        if (config.supabaseUrl && config.supabaseToken) {
+          try {
+            await sendToSupabase("import_juice_sales", iso, config.branch, juiceRows);
+            console.log("☁️ تم تحديث مبيعات العصيرات على Supabase أيضاً.");
+          } catch (supaErr) {
+            console.warn("⚠ تعذر تحديث Supabase (مبيعات العصيرات):", supaErr.message);
+          }
+        }
       } else {
         console.log("🥤 ما لقينا منتجات عصيرات بتقرير المنتجات — تأكد من juiceCategories بـ config.json");
       }

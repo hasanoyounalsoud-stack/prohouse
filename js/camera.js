@@ -1,5 +1,16 @@
 // ==================== وحدة كاميرا الجوال والمعاينة البصرية والتخزين (Mobile Camera & Inspection Module) ====================
 
+const JAMEEL_INSPECTION_CHECKPOINTS = [
+  { id: "bar_fridge_1", name: "بار التقديم الثلاجة 1", icon: "❄️", required: true },
+  { id: "bar_fridge_2", name: "بار التقديم الثلاجة 2", icon: "🧊", required: true },
+  { id: "sweets_zone", name: "منطقة الحلا", icon: "🍰", required: true },
+  { id: "snacks_zone", name: "منطقة السناكات", icon: "🥨", required: true },
+  { id: "pos_zone", name: "منطقة الكاشير", icon: "💻", required: true },
+  { id: "coffee_zone", name: "منطقة القهوة", icon: "☕", required: true },
+  { id: "coffee_machine", name: "ماكينة القهوة", icon: "⚙️", required: true },
+  { id: "oven_prep", name: "الفرن ومكان تجهيز الساندويتشات", icon: "🥪", required: true }
+];
+
 const DEFAULT_INSPECTION_CHECKPOINTS = [
   { id: "entrance", name: "مدخل الفرع واللوحة", icon: "🚪", required: true },
   { id: "counter", name: "منطقة الكاشير والـ POS", icon: "💻", required: true },
@@ -10,6 +21,13 @@ const DEFAULT_INSPECTION_CHECKPOINTS = [
   { id: "storage", name: "المخزن الجاف والعبوات", icon: "📦", required: true },
   { id: "delivery", name: "منطقة التسليم واستلام الطلبات", icon: "🛵", required: true }
 ];
+
+function getCheckpointsForBranch(branchName) {
+  if (branchName && branchName.includes("عبداللطيف جميل")) {
+    return JAMEEL_INSPECTION_CHECKPOINTS;
+  }
+  return DEFAULT_INSPECTION_CHECKPOINTS;
+}
 
 let dbInstance = null;
 let currentCameraStream = null;

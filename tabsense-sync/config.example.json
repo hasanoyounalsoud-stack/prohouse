@@ -4,5 +4,7 @@
   "branch": "عبداللطيف جميل",
   "prohouseApiUrl": "https://script.google.com/macros/s/AKfycbykhtn0VUleuPkNYAKutt6AFrpl-atN5dmruiRGTSkK8ejYZxzbsZ71AZyDQD_LMbe_/exec",
   "integrationToken": "هيك بحطلك ياه بعد ما أضيفه بالباك اند",
+  "supabaseUrl": "https://xxxx.supabase.co (اختياري — رابط مشروع Supabase الجديد)",
+  "supabaseToken": "اختياري — توكن التكامل من جدول settings (مفتاح integrationToken)",
   "juiceCategories": ["العصائر", "المشروبات"]
 }

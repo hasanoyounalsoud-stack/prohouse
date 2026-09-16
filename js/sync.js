@@ -32,12 +32,45 @@ const Sync = (() => {
     localStorage.setItem("ph_cache:" + key, JSON.stringify({ value, fetchedAt: Date.now() }));
   }
 
-  // ---- طلبات القراءة (GET) — cache-first-unblocked ----
+  // ---- طلبات القراءة (GET) — فائقة السرعة مع SupaEngine ----
   async function get(action, params, cacheKey, onFresh) {
     const ck = cacheKey || action;
     const cached = cacheGet(ck);
 
-    // نطلق طلب التحديث بالخلفية بدون تعطيل واجهة المستخدم
+    // إذا كان متاحاً محرك Supabase، نستخدمه مباشرةً وتكون الاستجابة في بضع ملي ثوانٍ!
+    if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
+      try {
+        let result = null;
+        const p = params || {};
+        switch (action) {
+          case "getItems": result = await SupaEngine.getItems(p.all === "1"); break;
+          case "getDay": result = await SupaEngine.getDay(p.date, p.branch); break;
+          case "getTomorrowOrder": result = await SupaEngine.getTomorrowOrder(p.date, p.branch); break;
+          case "getWasteReport": result = await SupaEngine.getWasteReport(p.date, p.branch); break;
+          case "getJuices": result = await SupaEngine.getJuices(p.all === "1"); break;
+          case "getJuiceDay": result = await SupaEngine.getJuiceDay(p.date, p.branch); break;
+          case "getSettings": result = await SupaEngine.getSettings(); break;
+          case "getEmployees": result = await SupaEngine.getEmployees(); break;
+          case "getSalesByCategory": result = await SupaEngine.getSalesByCategory(p.start, p.end, p.branch); break;
+          case "getReport": result = await SupaEngine.getReport(p.start, p.end, p.branch); break;
+          case "getDashboard": result = await SupaEngine.getDashboard(p.date); break;
+          case "getFlaggedItems": result = await SupaEngine.getFlaggedItems(p.start, p.end, (typeof Auth !== "undefined" && Auth.role && Auth.role() === "manager") ? Auth.branches() : null); break;
+          case "getRemainingReport": result = await SupaEngine.getDay(p.date, p.branch); break;
+          default:
+            console.warn("Action not handled directly in SupaEngine:", action);
+        }
+
+        if (result !== null) {
+          cacheSet(ck, result);
+          if (onFresh) onFresh(result);
+          return result;
+        }
+      } catch (err) {
+        console.warn("SupaEngine get fallback:", action, err);
+      }
+    }
+
+    // نطلق طلب التحديث بالخلفية بدون تعطيل واجهة المستخدم (مع Apps Script)
     const fetchPromise = (async () => {
       if (!API_URL) return null;
       try {
@@ -55,9 +88,6 @@ const Sync = (() => {
         if (onFresh) onFresh(json.data);
         return json.data;
       } catch (e) {
-        // انقطاع الشبكة متوقّع ومغطّى بالكاش — ما بنزعج المستخدم فيه.
-        // أما لو السيرفر رد برفض (صلاحية، فعل غير معروف، خطأ داخلي) فهاد عطل حقيقي:
-        // ابتلاعه بصمت بيخلي الشاشة تطلع فاضية بلا سبب ظاهر، وهاد أسوأ من رسالة خطأ.
         const offline = e.name === "AbortError" || e.name === "TypeError" || !navigator.onLine;
         if (!offline) {
           const msg = String(e.message || e).replace(/^(Error:\s*)+/, "");
@@ -71,17 +101,15 @@ const Sync = (() => {
       }
     })();
 
-    // إذا كان البيانات موجودة بالكاش المحلّي، بنرجّعها فوراً للواجهة (0 ملي ثانية) والـ Network بيمشي بالخلفية
     if (cached && cached.value !== null && cached.value !== undefined) {
       return cached.value;
     }
 
-    // إذا ما كانت بالكاش أبداً، ننتظر طلب الشبكة الأوّل
     const fresh = await fetchPromise;
     return fresh !== null ? fresh : (cached ? cached.value : null);
   }
 
-  // ---- طلبات الكتابة (POST) — عبر الطابور ----
+  // ---- طلبات الكتابة (POST) — فائقة السرعة مع SupaEngine ----
   function enqueue(dedupeKey, action, payload) {
     const q = getQueue();
     const existingIdx = q.findIndex(item => item.key === dedupeKey);
@@ -97,9 +125,39 @@ const Sync = (() => {
   }
 
   async function postOnce(action, payload) {
+    // توجيه الحفظ مباشرة إلى Supabase
+    if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
+      let handled = true;
+      try {
+        let res = null;
+        switch (action) {
+          case "saveItem": res = await SupaEngine.saveItem(payload); break;
+          case "deleteItem": res = await SupaEngine.deleteItem(payload); break;
+          case "saveJuice": res = await SupaEngine.saveJuice(payload); break;
+          case "deleteJuice": res = await SupaEngine.deleteJuice(payload); break;
+          case "saveDay": res = await SupaEngine.saveDay(payload); break;
+          case "saveRemainingReport": res = await SupaEngine.saveRemainingReport(payload); break;
+          case "saveTomorrowOrder": res = await SupaEngine.saveTomorrowOrder(payload); break;
+          case "saveWasteReport": res = await SupaEngine.saveWasteReport(payload); break;
+          case "saveJuiceDay": res = await SupaEngine.saveJuiceDay(payload); break;
+          case "saveSettings": res = await SupaEngine.saveSettings(payload); break;
+          default:
+            handled = false;
+            console.warn("Action not handled in SupaEngine postOnce:", action);
+        }
+        if (res !== null) return res;
+      } catch (err) {
+        // لو الفعل من مسؤولية سوبابيس وفشل: ما منرجع نكتب على النظام القديم بالخفاء —
+        // هيك كانت التعديلات تنقسم بين النظامين وما تبيّن بالمكان الصحيح. منخلي الخطأ
+        // يطلع وطابور المزامنة يعيد المحاولة لحاله.
+        if (handled) throw err;
+        console.warn("SupaEngine postOnce fallback:", err);
+      }
+    }
+
     const res = await fetch(API_URL, {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // يتفادى CORS preflight مع Apps Script
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ action, payload, token: Auth.getToken() })
     });
     const json = await res.json();

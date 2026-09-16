@@ -1,4 +1,4 @@
-// Service Worker: Pro House Operations Center v4.5.0
+// Service Worker: Pro House Operations Center v4.3.5
 // يخزّن هيكل التطبيق (HTML/CSS/JS) محلياً لدعم العمل أوفلاين التام للموظفين والفروع.
 
 const CACHE_NAME = "prohouse-shell-v4.5.0";
@@ -11,6 +11,7 @@ const SHELL_FILES = [
   "./manifest.json",
   "./css/style.css",
   "./js/config.js",
+  "./js/supabase-engine.js",
   "./js/shared.js",
   "./js/auth.js",
   "./js/sync.js",
@@ -22,6 +23,7 @@ const SHELL_FILES = [
   "./js/waste.js",
   "./js/users.js",
   "./js/audit.js",
+  "./js/entry.js",
   "./js/forecast.js",
   "./js/tomorrow.js",
   "./js/juices.js",
