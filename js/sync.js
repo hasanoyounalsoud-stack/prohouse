@@ -53,6 +53,8 @@ const Sync = (() => {
           case "getEmployees": result = await SupaEngine.getEmployees(); break;
           case "getSalesByCategory": result = await SupaEngine.getSalesByCategory(p.start, p.end, p.branch); break;
           case "getReport": result = await SupaEngine.getReport(p.start, p.end, p.branch); break;
+          case "getDashboard": result = await SupaEngine.getDashboard(p.date); break;
+          case "getFlaggedItems": result = await SupaEngine.getFlaggedItems(p.start, p.end, (typeof Auth !== "undefined" && Auth.role && Auth.role() === "manager") ? Auth.branches() : null); break;
           case "getRemainingReport": result = await SupaEngine.getDay(p.date, p.branch); break;
           default:
             console.warn("Action not handled directly in SupaEngine:", action);
@@ -125,23 +127,31 @@ const Sync = (() => {
   async function postOnce(action, payload) {
     // توجيه الحفظ مباشرة إلى Supabase
     if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
+      let handled = true;
       try {
         let res = null;
         switch (action) {
           case "saveItem": res = await SupaEngine.saveItem(payload); break;
           case "deleteItem": res = await SupaEngine.deleteItem(payload); break;
+          case "saveJuice": res = await SupaEngine.saveJuice(payload); break;
+          case "deleteJuice": res = await SupaEngine.deleteJuice(payload); break;
           case "saveDay": res = await SupaEngine.saveDay(payload); break;
-          case "saveRemainingReport": res = await SupaEngine.saveDay(payload); break;
+          case "saveRemainingReport": res = await SupaEngine.saveRemainingReport(payload); break;
           case "saveTomorrowOrder": res = await SupaEngine.saveTomorrowOrder(payload); break;
           case "saveWasteReport": res = await SupaEngine.saveWasteReport(payload); break;
           case "saveJuiceDay": res = await SupaEngine.saveJuiceDay(payload); break;
           case "saveSettings": res = await SupaEngine.saveSettings(payload); break;
           default:
+            handled = false;
             console.warn("Action not handled in SupaEngine postOnce:", action);
         }
         if (res !== null) return res;
       } catch (err) {
-        console.warn("SupaEngine postOnce error, attempting fallback:", err);
+        // لو الفعل من مسؤولية سوبابيس وفشل: ما منرجع نكتب على النظام القديم بالخفاء —
+        // هيك كانت التعديلات تنقسم بين النظامين وما تبيّن بالمكان الصحيح. منخلي الخطأ
+        // يطلع وطابور المزامنة يعيد المحاولة لحاله.
+        if (handled) throw err;
+        console.warn("SupaEngine postOnce fallback:", err);
       }
     }
 

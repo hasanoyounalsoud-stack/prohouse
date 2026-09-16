@@ -93,15 +93,20 @@ const Auth = (() => {
 
     if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
       try {
-        const sessions = await fetch(SUPABASE_URL + "/rest/v1/sessions?select=*,employees(*)&token=eq." + token, {
+        // التحقق صار عبر دالة verify_session بالداتابيس — جدول الجلسات نفسه
+        // ما عاد قابل للقراءة المباشرة من المتصفح
+        const res = await fetch(SUPABASE_URL + "/rest/v1/rpc/verify_session", {
+          method: "POST",
           headers: {
             "apikey": SUPABASE_ANON_KEY,
-            "Authorization": "Bearer " + SUPABASE_ANON_KEY
-          }
-        }).then(r => r.json());
+            "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ p_token: token })
+        });
+        const emp = res.ok ? await res.json() : null;
 
-        if (sessions && sessions.length && sessions[0].employees) {
-          const emp = sessions[0].employees;
+        if (emp && emp.id) {
           const formatted = {
             id: emp.id,
             name: emp.name,
@@ -110,6 +115,12 @@ const Auth = (() => {
           };
           setSession(token, formatted);
           return true;
+        }
+        if (res.ok) {
+          // السيرفر رد بوضوح: الجلسة القديمة ما عادت صالحة (مثلاً تسجيل دخول من
+          // النظام القديم) — منمسحها وبنطلب دخول من جديد بدل شاشات فاضية
+          clearSession();
+          return false;
         }
       } catch (err) {
         console.warn("Supabase verify fallback to local:", err);

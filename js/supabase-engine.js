@@ -1,5 +1,7 @@
 // ==================== محرك Supabase فائق السرعة لـ Pro House ====================
-// ينفذ كل عمليات النظام (قراءة، حفظ، مصادقة) خلال 30-80 ملي ثانية فقط!
+// الإصدار المقوّى v3.1 — يشتغل مع supabase_hardening.sql
+// كل طلب بيرسل هيدر x-session-token (جلسة الموظف)، والمصادقة صارت داخل الداتابيس.
+// ما في أي وصول بدون جلسة صالحة — لا قراءة ولا كتابة ولا حذف.
 
 const SupaEngine = (() => {
   const PIN_SALT = "prohouse-2026-salt";
@@ -12,11 +14,22 @@ const SupaEngine = (() => {
     return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
   }
 
+  // توكن الجلسة الحالي — الداتابيس بيتحقق منه بكل طلب عبر هيدر x-session-token
+  function sessionToken() {
+    try {
+      if (typeof Auth !== "undefined" && Auth.getToken) return Auth.getToken();
+      return localStorage.getItem("ph_token") || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
   function getHeaders(extraHeaders) {
     return {
       "apikey": SUPABASE_ANON_KEY,
       "Authorization": "Bearer " + SUPABASE_ANON_KEY,
       "Content-Type": "application/json",
+      "x-session-token": sessionToken(),
       "Prefer": "return=representation",
       ...(extraHeaders || {})
     };
@@ -29,66 +42,51 @@ const SupaEngine = (() => {
       headers: getHeaders(options.headers)
     });
     if (!res.ok) {
-      let errText = await res.text();
-      throw new Error(`Supabase error [${res.status}]: ${errText}`);
+      // رسائل الخطأ العربية اللي بترجع من الداتابيس (raise exception) بينعرضوا زي ما هني
+      let msg = "";
+      try {
+        const errJson = await res.json();
+        msg = errJson.message || errJson.error || errJson.hint || "";
+      } catch (e) { /* مو JSON */ }
+      throw new Error(msg || `Supabase error [${res.status}]`);
     }
     const text = await res.text();
     return text ? JSON.parse(text) : null;
   }
 
+  // أرقام بتترجع من الداتابيس: فاضي = null (بلا قيمة)، عدا هيك رقم
+  function numOrNull(v) {
+    if (v === "" || v === null || v === undefined) return null;
+    const n = Number(v);
+    return isNaN(n) ? null : n;
+  }
+
   // --- تسجيل الدخول والمصادقة ---
+  // الشيك الفعلي للرقم السري صار داخل دالة login بالداتابيس (ما حد يقدر يقرأ جدول
+  // الموظفين ولا يشوف الهاشات من المتصفح)
   async function login(pin) {
-    if (!pin) throw new Error("أدخل الرقم السري");
-    const hash = await sha256(pin);
-
-    const users = await query(`employees?select=*&pin=eq.${encodeURIComponent(hash)}&active=eq.true`);
-    if (!users || !users.length) {
-      throw new Error("الرقم السري غير صحيح");
-    }
-
-    const row = users[0];
-    const token = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())) + (crypto.randomUUID ? crypto.randomUUID() : "");
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-    await query("sessions", {
+    const data = await query("rpc/login", {
       method: "POST",
-      body: JSON.stringify({
-        token,
-        employee_id: row.id,
-        expires_at: expiresAt
-      })
+      body: JSON.stringify({ p_pin: String(pin == null ? "" : pin) })
     });
-
+    if (!data || !data.token) throw new Error("تعذر تسجيل الدخول");
+    const emp = data.employee || {};
     return {
-      token,
+      token: data.token,
       employee: {
-        id: row.id,
-        name: row.name,
-        role: row.role,
-        branches: (row.branches || "").split(",").map(s => s.trim()).filter(Boolean)
+        id: emp.id,
+        name: emp.name,
+        role: emp.role,
+        branches: (emp.branches || "").split(",").map(s => s.trim()).filter(Boolean)
       }
     };
   }
 
   async function changePin(employee, { currentPin, newPin }) {
-    if (!/^\d{4,8}$/.test(newPin)) throw new Error("الرقم الجديد لازم يكون من 4 لـ 8 أرقام");
-    if (currentPin === newPin) throw new Error("الرقم الجديد نفس القديم");
-
-    const curHash = await sha256(currentPin);
-    const newHash = await sha256(newPin);
-
-    const users = await query(`employees?select=*&id=eq.${employee.id}&pin=eq.${curHash}`);
-    if (!users || !users.length) throw new Error("الرقم الحالي غير صحيح");
-
-    const taken = await query(`employees?select=id&pin=eq.${newHash}&id=neq.${employee.id}`);
-    if (taken && taken.length) throw new Error("الرقم مستخدم من موظف آخر");
-
-    await query(`employees?id=eq.${employee.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ pin: newHash })
+    await query("rpc/change_pin", {
+      method: "POST",
+      body: JSON.stringify({ p_current: String(currentPin || ""), p_new: String(newPin || "") })
     });
-
-    await query(`sessions?employee_id=eq.${employee.id}`, { method: "DELETE" });
     return { ok: true };
   }
 
@@ -138,6 +136,68 @@ const SupaEngine = (() => {
     return { id: payload.id };
   }
 
+  // --- العصائر: إدارة القائمة (كانت ناقصة — الحفظ كان بيرجع للباك اند القديم) ---
+  async function saveJuice(payload) {
+    const id = payload.id || (crypto.randomUUID ? crypto.randomUUID() : "ju_" + Date.now());
+    const body = {
+      id,
+      name: payload.name,
+      unit: payload.unit || "",
+      tabsense_name: payload.tabsenseName || payload.tabsense_name || "",
+      branches: payload.branches || "",
+      active: payload.active !== false,
+      sort_order: payload.sortOrder || 0,
+      updated_at: new Date().toISOString()
+    };
+    await query("juices", {
+      method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify(body)
+    });
+    return { id };
+  }
+
+  async function deleteJuice(payload) {
+    await query(`juices?id=eq.${payload.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active: false, updated_at: new Date().toISOString() })
+    });
+    return { id: payload.id };
+  }
+
+  // --- مخطّطات مشتركة بين القراءات ---
+  function mapEntry(e) {
+    return {
+      date: e.date,
+      branch: e.branch,
+      itemId: e.item_id,
+      itemName: e.item_name,
+      unit: e.unit,
+      confirmed: e.confirmed,
+      received: e.received,
+      returned: e.returned,
+      cookName: e.cook_name,
+      notes: e.notes,
+      remaining: e.remaining,
+      remainingWeight: e.remaining_weight,
+      remainingSauce: e.remaining_sauce,
+      savedAt: e.saved_at
+    };
+  }
+
+  function mapMeta(m) {
+    if (!m) return null;
+    return {
+      date: m.date,
+      branch: m.branch,
+      employeeName: m.employee_name,
+      salesReportLink: m.sales_report_link,
+      paymentsReportLink: m.payments_report_link,
+      savedAt: m.saved_at,
+      updatedAt: m.updated_at
+    };
+  }
+
   // --- تقرير الاستلام وميتا اليوم (DailyEntries & DayMeta) ---
   async function getDay(date, branch) {
     const [entries, meta] = await Promise.all([
@@ -148,34 +208,14 @@ const SupaEngine = (() => {
     return {
       date,
       branch,
-      meta: meta && meta[0] ? {
-        date: meta[0].date,
-        branch: meta[0].branch,
-        employeeName: meta[0].employee_name,
-        salesReportLink: meta[0].sales_report_link,
-        paymentsReportLink: meta[0].payments_report_link,
-        savedAt: meta[0].saved_at,
-        updatedAt: meta[0].updated_at
-      } : null,
-      items: (entries || []).map(e => ({
-        date: e.date,
-        branch: e.branch,
-        itemId: e.item_id,
-        itemName: e.item_name,
-        unit: e.unit,
-        confirmed: e.confirmed,
-        received: e.received,
-        returned: e.returned,
-        cookName: e.cook_name,
-        notes: e.notes,
-        savedAt: e.saved_at
-      }))
+      meta: meta && meta[0] ? mapMeta(meta[0]) : null,
+      items: (entries || []).map(mapEntry)
     };
   }
 
   async function saveDay(payload) {
     const { date, branch, items, employeeName, salesReportLink, paymentsReportLink } = payload;
-    
+
     // حفظ أو تحديث الميتا
     if (employeeName || salesReportLink || paymentsReportLink) {
       await query("day_meta", {
@@ -207,13 +247,42 @@ const SupaEngine = (() => {
         saved_at: new Date().toISOString()
       }));
 
-      await query("daily_entries", {
+      // on_conflict: التحديث يصير على مفتاح (اليوم + الفرع + الصنف) — بدونه إعادة
+      // حفظ أي صنف كانت تفشل بخطأ duplicate key (409) والتعديلات بتضيع
+      await query("daily_entries?on_conflict=date,branch,item_id", {
         method: "POST",
         headers: { "Prefer": "resolution=merge-duplicates" },
         body: JSON.stringify(rows)
       });
     }
 
+    return { date, branch, savedAt: new Date().toISOString() };
+  }
+
+  // حفظ تقرير المتبقي: بيحدّث أعمدة المتبقي فقط على نفس صف اليوم —
+  // ما بيمسّ أرقام الاستلام المحفوظة (قبل هيك كان بيروح لحفظ الاستلام وبيصفّرها)
+  async function saveRemainingReport(payload) {
+    const { date, branch, items } = payload;
+    if (items && items.length) {
+      const rows = items.map(it => ({
+        date,
+        branch,
+        item_id: it.itemId,
+        item_name: it.itemName || "",
+        unit: it.unit || "",
+        remaining: numOrNull(it.remainingWeight || it.remaining),
+        remaining_weight: numOrNull(it.remainingWeight),
+        remaining_sauce: numOrNull(it.remainingSauce),
+        notes: it.notes || "",
+        saved_at: new Date().toISOString()
+      }));
+
+      await query("daily_entries?on_conflict=date,branch,item_id", {
+        method: "POST",
+        headers: { "Prefer": "resolution=merge-duplicates" },
+        body: JSON.stringify(rows)
+      });
+    }
     return { date, branch, savedAt: new Date().toISOString() };
   }
 
@@ -234,6 +303,11 @@ const SupaEngine = (() => {
 
   async function saveTomorrowOrder(payload) {
     const { date, branch, items, employeeName } = payload;
+
+    // استبدال كامل لطلبية نفس اليوم والفرع (نفس سلوك النظام القديم) — عشان لو
+    // الموظف شال صنف من الطلبية، ما يضل صف قديم إله بيرجع يبيّن بالمقارنة
+    await query(`tomorrow_orders?date=eq.${date}&branch=eq.${encodeURIComponent(branch)}`, { method: "DELETE" });
+
     if (items && items.length) {
       const rows = items.map(it => ({
         date,
@@ -249,7 +323,6 @@ const SupaEngine = (() => {
 
       await query("tomorrow_orders", {
         method: "POST",
-        headers: { "Prefer": "resolution=merge-duplicates" },
         body: JSON.stringify(rows)
       });
     }
@@ -368,7 +441,7 @@ const SupaEngine = (() => {
         saved_at: new Date().toISOString()
       }));
 
-      await query("juice_counts", {
+      await query("juice_counts?on_conflict=date,branch,juice_id", {
         method: "POST",
         headers: { "Prefer": "resolution=merge-duplicates" },
         body: JSON.stringify(rows)
@@ -399,8 +472,10 @@ const SupaEngine = (() => {
     return getSettings();
   }
 
+  // ملاحظة: عمود الرقم السري (pin) ما عاد قابل للقراءة من المتصفح نهائياً —
+  // حتى لو حاول حد، الداتابيس بترفض الطلب
   async function getEmployees() {
-    const res = await query("employees?select=*&active=eq.true");
+    const res = await query("employees?select=id,name,role,branches,active&active=eq.true");
     return (res || []).map(r => ({
       id: r.id,
       name: r.name,
@@ -441,18 +516,7 @@ const SupaEngine = (() => {
     (entries || []).forEach(r => {
       const k = r.date + "||" + r.branch;
       if (!byDateBranch[k]) byDateBranch[k] = [];
-      byDateBranch[k].push({
-        date: r.date,
-        branch: r.branch,
-        itemId: r.item_id,
-        itemName: r.item_name,
-        unit: r.unit,
-        confirmed: r.confirmed,
-        received: r.received,
-        returned: r.returned,
-        cookName: r.cook_name,
-        notes: r.notes
-      });
+      byDateBranch[k].push(mapEntry(r));
     });
 
     const days = Object.keys(byDateBranch).sort().map(k => {
@@ -497,14 +561,132 @@ const SupaEngine = (() => {
     };
   }
 
+  // أعلى نسب الإرجاع — نسخة خفيفة (بس جدول الإدخالات + الإعدادات)
+  async function getFlaggedItems(start, end, branchFilter) {
+    let bf = "";
+    if (branchFilter && branchFilter.length) {
+      const branchesArr = Array.isArray(branchFilter) ? branchFilter : branchFilter.split(",");
+      bf = `&branch=in.(${branchesArr.map(b => `"${b.trim()}"`).join(",")})`;
+    }
+
+    const [entries, settings] = await Promise.all([
+      query(`daily_entries?select=item_id,item_name,unit,received,returned&date=gte.${start}&date=lte.${end}${bf}`),
+      getSettings()
+    ]);
+
+    const returnThreshold = settings && settings.returnThresholdPct !== undefined && settings.returnThresholdPct !== ""
+      ? Number(settings.returnThresholdPct) : 0.30;
+
+    const totalsMap = {};
+    (entries || []).forEach(r => {
+      if (!totalsMap[r.item_id]) {
+        totalsMap[r.item_id] = { itemId: r.item_id, itemName: r.item_name, unit: r.unit, totalReceived: 0, totalReturned: 0, dayCount: 0 };
+      }
+      const t = totalsMap[r.item_id];
+      const rec = Number(r.received) || 0;
+      const ret = Number(r.returned) || 0;
+      t.totalReceived += rec;
+      t.totalReturned += ret;
+      if (rec > 0) t.dayCount++;
+    });
+
+    const flagged = [];
+    Object.keys(totalsMap).forEach(id => {
+      const t = totalsMap[id];
+      t.avgDaily = t.dayCount > 0 ? t.totalReceived / t.dayCount : null;
+      t.returnPct = t.totalReceived > 0 ? t.totalReturned / t.totalReceived : null;
+      t.flagged = t.returnPct !== null && t.returnPct >= returnThreshold;
+      if (t.flagged) flagged.push(t);
+    });
+    return flagged;
+  }
+
+  // --- الداشبورد المجمّع: كل الفروع بنداء واحد ---
+  // نفس شكل البيانات اللي الواجهة بتتوقعها من الباك اند القديم، فالداشبورد بيضل
+  // سريع بعد الهجرة وما بيلزمه يلمس الشيت.
+  async function getDashboard(date) {
+    const prevDate = addDaysStr(date, -1);
+    const nextDate = addDaysStr(date, 1);
+
+    const [todayRows, yestRows, metaRows, tomorrowRows, jCounts, jSales, settings] = await Promise.all([
+      query(`daily_entries?select=*&date=eq.${date}`),
+      query(`daily_entries?select=*&date=eq.${prevDate}`),
+      query(`day_meta?select=*&date=in.(${date},${prevDate})`),
+      query(`tomorrow_orders?select=*&date=eq.${nextDate}`),
+      query(`juice_counts?select=*&date=in.(${date},${prevDate})`),
+      query(`juice_sales?select=*&date=eq.${date}`),
+      getSettings()
+    ]);
+
+    // الفروع من الإعدادات + أي فرع ظهر بالبيانات
+    const branches = [];
+    const addBranch = (b) => { if (b && branches.indexOf(b) === -1) branches.push(b); };
+    ((settings && settings.branches) || DEFAULT_BRANCHES_FALLBACK).split(",").forEach(b => addBranch(b.trim()));
+    [].concat(todayRows || [], tomorrowRows || []).forEach(r => addBranch(r.branch));
+
+    function dayShape(rowSource, d, b) {
+      const meta = (metaRows || []).find(m => m.date === d && m.branch === b) || null;
+      return {
+        date: d,
+        branch: b,
+        meta: mapMeta(meta),
+        items: (rowSource || []).filter(r => r.date === d && r.branch === b).map(mapEntry)
+      };
+    }
+
+    const out = {};
+    branches.forEach(b => {
+      const prevCounted = {};
+      (jCounts || []).filter(r => r.date === prevDate && r.branch === b)
+        .forEach(r => { prevCounted[r.juice_id] = r.counted; });
+
+      out[b] = {
+        today: dayShape(todayRows, date, b),
+        yesterday: dayShape(yestRows, prevDate, b),
+        tomorrow: (tomorrowRows || []).filter(r => r.date === nextDate && r.branch === b).map(r => ({
+          date: r.date,
+          branch: r.branch,
+          itemId: r.item_id,
+          itemName: r.item_name,
+          unit: r.unit,
+          qty: r.qty,
+          notes: r.notes,
+          employeeName: r.employee_name
+        })),
+        juiceDay: {
+          date,
+          branch: b,
+          items: (jCounts || []).filter(r => r.date === date && r.branch === b).map(r => ({
+            juiceId: r.juice_id,
+            juiceName: r.juice_name,
+            unit: r.unit,
+            opening: r.opening,
+            added: r.added,
+            sold: r.sold,
+            counted: r.counted,
+            notes: r.notes,
+            employeeName: r.employee_name
+          })),
+          prevCounted,
+          sales: (jSales || []).filter(r => r.date === date && r.branch === b).map(r => ({ productName: r.product_name, qty: r.qty }))
+        }
+      };
+    });
+
+    return { date, branches: out };
+  }
+
   return {
     login,
     changePin,
     getItems,
     saveItem,
     deleteItem,
+    saveJuice,
+    deleteJuice,
     getDay,
     saveDay,
+    saveRemainingReport,
     getTomorrowOrder,
     saveTomorrowOrder,
     getWasteReport,
@@ -516,6 +698,8 @@ const SupaEngine = (() => {
     saveSettings,
     getEmployees,
     getSalesByCategory,
-    getReport
+    getReport,
+    getFlaggedItems,
+    getDashboard
   };
 })();
