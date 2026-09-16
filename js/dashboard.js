@@ -22,20 +22,48 @@ function mealsFromDayItems(dayItems) {
   return grams / MEAL_WEIGHT_G;
 }
 
-async function loadBranchStatus(branch) {
+// يبذر كاش كل شاشة من رد الداشبورد المجمّع — هيك شاشات الاستلام/المتبقي/العصيرات
+// بتلاقي بياناتها محفوظة محلياً وما بتحتاج طلبات إضافية أول ما يفتحها الموظف.
+function applyDashboardPayload(dash) {
+  if (!dash || !dash.branches) return;
+  const today = dash.date || todayStr();
+  const yesterday = addDaysStr(today, -1);
+  const tomorrow = addDaysStr(today, 1);
+  Object.keys(dash.branches).forEach(branch => {
+    const b = dash.branches[branch];
+    if (!b) return;
+    if (b.today) Sync.cacheSet("day:" + today + ":" + branch, b.today);
+    if (b.yesterday) Sync.cacheSet("day:" + yesterday + ":" + branch, b.yesterday);
+    if (b.tomorrow) Sync.cacheSet("tomorrow:" + tomorrow + ":" + branch, b.tomorrow);
+    if (b.juiceDay) Sync.cacheSet("juiceday:" + today + ":" + branch, b.juiceDay);
+  });
+}
+
+async function loadBranchStatus(branch, dash) {
   const visible = branchVisibleItems(branch);
   const today = todayStr();
   const yesterday = addDaysStr(today, -1);
   const tomorrow = addDaysStr(today, 1);
 
-  const [dayData, yesterdayData, tomorrowOrder, juiceDay] = await Promise.all([
-    Sync.get("getDay", { date: today, branch }, "day:" + today + ":" + branch),
-    Sync.get("getDay", { date: yesterday, branch }, "day:" + yesterday + ":" + branch),
-    Sync.get("getTomorrowOrder", { date: tomorrow, branch }, "tomorrow:" + tomorrow + ":" + branch),
-    tabAllowed("juices")
-      ? Sync.get("getJuiceDay", { date: today, branch }, "juiceday:" + today + ":" + branch)
-      : Promise.resolve(null)
-  ]);
+  let dayData, yesterdayData, tomorrowOrder, juiceDay;
+  const fromDash = dash && dash.branches && dash.branches[branch];
+  if (fromDash) {
+    // نداء واحد مجمّع من السيرفر (getDashboard) بدل 4 نداءات مستقلة لكل فرع
+    dayData = fromDash.today;
+    yesterdayData = fromDash.yesterday;
+    tomorrowOrder = fromDash.tomorrow;
+    juiceDay = fromDash.juiceDay || null;
+  } else {
+    // ما رجع الداشبورد (أوفلاين من أول مرة)؟ منرجع للطريقة القديمة — الكاش المحلي بيكفّي
+    [dayData, yesterdayData, tomorrowOrder, juiceDay] = await Promise.all([
+      Sync.get("getDay", { date: today, branch }, "day:" + today + ":" + branch),
+      Sync.get("getDay", { date: yesterday, branch }, "day:" + yesterday + ":" + branch),
+      Sync.get("getTomorrowOrder", { date: tomorrow, branch }, "tomorrow:" + tomorrow + ":" + branch),
+      tabAllowed("juices")
+        ? Sync.get("getJuiceDay", { date: today, branch }, "juiceday:" + today + ":" + branch)
+        : Promise.resolve(null)
+    ]);
+  }
 
   const items = (dayData && dayData.items) || [];
   const confirmedIds = new Set(items.filter(it => it.confirmed === true || it.confirmed === "TRUE").map(it => it.itemId));
@@ -117,7 +145,11 @@ async function renderDashboard() {
 
   await Promise.all([Items.load(), tabAllowed("juices") ? Juices.load() : Promise.resolve()]);
   const branches = allowedBranchList();
-  const statuses = await Promise.all(branches.map(loadBranchStatus));
+  // نداء واحد مجمّع لكل فروع المستخدم بدل ~17 نداء (شوف getDashboardData_ بالباك اند)
+  const today = todayStr();
+  const dash = await Sync.get("getDashboard", { date: today }, "dashboard:" + today, (fresh) => applyDashboardPayload(fresh));
+  applyDashboardPayload(dash);
+  const statuses = await Promise.all(branches.map(b => loadBranchStatus(b, dash)));
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "صباح الخير" : "مساء الخير";
@@ -128,9 +160,9 @@ async function renderDashboard() {
   if (Auth.canSeeReports()) {
     const monthStart = todayStr().slice(0, 7) + "-01";
     const monthEnd = todayStr();
-    const reportData = await Sync.get("getReport", { start: monthStart, end: monthEnd }, "report:" + monthStart + ":" + monthEnd);
-    flagged = ((reportData && reportData.totals) || [])
-      .filter(t => t.flagged)
+    // نداء خفيف بيرجع الأصناف المرتفعة بس (كان قبل يقرأ جداول المبيعات والعصيرات كلها بلا داعي)
+    const flaggedData = await Sync.get("getFlaggedItems", { start: monthStart, end: monthEnd }, "flagged:" + monthStart + ":" + monthEnd);
+    flagged = (flaggedData || [])
       .sort((a, b) => b.returnPct - a.returnPct)
       .slice(0, 5);
   }

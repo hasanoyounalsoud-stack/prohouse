@@ -14,7 +14,10 @@ async function renderBranchesHubView() {
   const branches = allowedBranchList();
   const date = todayStr();
 
-  const branchStatuses = await Promise.all(branches.map(b => loadBranchStatus(b)));
+  // نفس نداء الداشبورد المجمّع — بدل 4 نداءات مستقلة لكل فرع
+  const dash = await Sync.get("getDashboard", { date }, "dashboard:" + date, (fresh) => applyDashboardPayload(fresh));
+  applyDashboardPayload(dash);
+  const branchStatuses = await Promise.all(branches.map(b => loadBranchStatus(b, dash)));
 
   let html = `
     <div class="branches-hub-header">
