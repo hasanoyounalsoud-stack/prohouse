@@ -2,7 +2,7 @@
  * Pro House — Apps Script backend.
  * Bind this script to the Google Sheet that has these tabs (header row = row 1):
  *   Items:          id, category, name, unit, hasCustomName, branches, active, sortOrder, updatedAt
- *   DailyEntries:   date, branch, itemId, itemName, unit, confirmed, received, returned, cookName, notes, savedAt
+ *   DailyEntries:   date, branch, itemId, itemName, unit, confirmed, received, returned, cookName, notes, savedAt, remaining, remainingWeight, remainingSauce
  *   DayMeta:        date, branch, employeeName, salesReportLink, paymentsReportLink, savedAt, updatedAt
  *   TomorrowOrders: date, branch, itemId, itemName, unit, qty, notes, employeeName, savedAt
  *   Employees:      name, active, id, pin, role, branches   (roles: owner, manager, chef, employee)
@@ -38,7 +38,7 @@ var SHEET_NAMES = {
 // (نفس مشكلة "column-shift" اللي انصلحت قبل هيك بمشروع تاني).
 var SHEET_HEADERS = {
   Items: ['id', 'category', 'name', 'unit', 'hasCustomName', 'branches', 'active', 'sortOrder', 'updatedAt'],
-  DailyEntries: ['date', 'branch', 'itemId', 'itemName', 'unit', 'confirmed', 'received', 'returned', 'cookName', 'notes', 'savedAt'],
+  DailyEntries: ['date', 'branch', 'itemId', 'itemName', 'unit', 'confirmed', 'received', 'returned', 'cookName', 'notes', 'savedAt', 'remaining', 'remainingWeight', 'remainingSauce'],
   DayMeta: ['date', 'branch', 'employeeName', 'salesReportLink', 'paymentsReportLink', 'savedAt', 'updatedAt'],
   TomorrowOrders: ['date', 'branch', 'itemId', 'itemName', 'unit', 'qty', 'notes', 'employeeName', 'savedAt'],
   Employees: ['name', 'active', 'id', 'pin', 'role', 'branches'],
@@ -106,6 +106,7 @@ function setupEverything() {
   ensureDefaultSetting('branches', DEFAULT_BRANCHES);
   ensureDefaultSetting('categoryOrder', DEFAULT_CATEGORY_ORDER);
   ensureDefaultSetting('integrationToken', Utilities.getUuid());
+  invalidateAllSheets_(); // عناوين تغيّرت — أي كاش قديم انتهى
   return 'تم إعداد كل التبويبات بنجاح';
 }
 
@@ -119,25 +120,28 @@ function ensureDefaultSetting(key, defaultValue) {
 // يعبّي أعمدة تسجيل الدخول (id/pin/role/branches) للموظفين الموجودين بالشيت لو كانت فاضية —
 // ما بيلمس أي قيمة موجودة أصلاً، حتى لو تعدّلت يدوياً بالشيت. آمنة تشتغل أكثر من مرة.
 function migrateEmployees_() {
-  var r = readRows(SHEET_NAMES.EMPLOYEES);
+  var r = readRows(SHEET_NAMES.EMPLOYEES, true);
   var idCol = r.headers.indexOf('id') + 1;
   var pinCol = r.headers.indexOf('pin') + 1;
   var roleCol = r.headers.indexOf('role') + 1;
   var branchesCol = r.headers.indexOf('branches') + 1;
   var issued = [];
+  var touched = false;
   r.rows.forEach(function (row, i) {
     var rowNum = i + 2;
     var name = String(row.name || '').trim();
     var roster = EMPLOYEE_ROSTER[name];
-    if (!row.id) r.sh.getRange(rowNum, idCol).setValue(Utilities.getUuid());
-    if (!row.role) r.sh.getRange(rowNum, roleCol).setValue(roster ? roster.role : 'employee');
-    if (!row.branches && roster) r.sh.getRange(rowNum, branchesCol).setValue(roster.branches);
+    if (!row.id) { r.sh.getRange(rowNum, idCol).setValue(Utilities.getUuid()); touched = true; }
+    if (!row.role) { r.sh.getRange(rowNum, roleCol).setValue(roster ? roster.role : 'employee'); touched = true; }
+    if (!row.branches && roster) { r.sh.getRange(rowNum, branchesCol).setValue(roster.branches); touched = true; }
     if (!row.pin) {
       var pin = randomPin_();
       r.sh.getRange(rowNum, pinCol).setValue(hashPin_(pin));
+      touched = true;
       issued.push(name + ': ' + pin);
     }
   });
+  if (touched) invalidateSheet_(SHEET_NAMES.EMPLOYEES);
   // الأرقام بتظهر بسجل التنفيذ بس (View > Executions) — ما بتنكتب بأي ملف ولا بالشيت
   if (issued.length) Logger.log('أرقام سرية جديدة (انسخها وسلّمها لأصحابها ثم أغلق السجل):\n' + issued.join('\n'));
 }
@@ -148,12 +152,13 @@ function migrateEmployees_() {
  */
 function resetPinFor() {
   var employeeName = 'حسن'; // ← بدّل الاسم هون قبل التشغيل
-  var r = readRows(SHEET_NAMES.EMPLOYEES);
+  var r = readRows(SHEET_NAMES.EMPLOYEES, true);
   var pinCol = r.headers.indexOf('pin') + 1;
   for (var i = 0; i < r.rows.length; i++) {
     if (String(r.rows[i].name || '').trim() === employeeName) {
       var pin = randomPin_();
       r.sh.getRange(i + 2, pinCol).setValue(hashPin_(pin));
+      invalidateSheet_(SHEET_NAMES.EMPLOYEES);
       Logger.log('الرقم السري الجديد لـ ' + employeeName + ': ' + pin);
       return 'تم — شوف الرقم بسجل التنفيذ (View > Executions)';
     }
@@ -207,12 +212,21 @@ function seedInitialDataIfEmpty() {
   var employeesSheet = sheet(SHEET_NAMES.EMPLOYEES);
   if (employeesSheet.getLastRow() < 2) {
     var names = Object.keys(EMPLOYEE_ROSTER);
+    var issuedPins = [];
     var rows2 = names.map(function (name) {
       var ro = EMPLOYEE_ROSTER[name];
+      // الرقم السري ما بينكتب بالريبو أبداً — بينتولّد عشوائياً وقت الإعداد وبينطبع بسجل
+      // التنفيذ بس. (قبل هيك كان بينحسب هاش على قيمة فاضية، فكل الموظفين المزروعين
+      // بياخدوا نفس الهاش — يعني مفتاح دخول عام.)
+      var pin = ro.pin || randomPin_();
+      if (!ro.pin) issuedPins.push(name + ': ' + pin);
       // name, active, id, pin, role, branches
-      return [name, true, Utilities.getUuid(), hashPin_(ro.pin), ro.role, ro.branches];
+      return [name, true, Utilities.getUuid(), hashPin_(pin), ro.role, ro.branches];
     });
     employeesSheet.getRange(2, 1, rows2.length, 6).setValues(rows2);
+    if (issuedPins.length) {
+      Logger.log('أرقام سرية جديدة (انسخها وسلّمها لأصحابها ثم أغلق السجل):\n' + issuedPins.join('\n'));
+    }
   }
 
   var settingsSheet = sheet(SHEET_NAMES.SETTINGS);
@@ -260,6 +274,13 @@ function doGet(e) {
         data = getEmployees();
         break;
       case 'getSettings': data = getSettingsForClient_(employee); break;
+      case 'getDashboard':
+        data = getDashboardData_(e.parameter.date, employee);
+        break;
+      case 'getFlaggedItems':
+        if (employee.role === 'employee') throw new Error('غير مصرح');
+        data = getFlaggedItems_(e.parameter.start, e.parameter.end, employee.role === 'manager' ? employee.branches : null);
+        break;
       case 'getWasteReport':
         requireBranchAccess_(employee, e.parameter.branch);
         data = getWasteReport(e.parameter.date, e.parameter.branch);
@@ -311,10 +332,9 @@ function doPost(e) {
       requireIntegrationToken_(body.integrationToken);
       return jsonOut({ ok: true, data: importJuiceSales(body.payload) });
     }
-    if (body.action === 'clearAllEntriesData') {
-      return jsonOut({ ok: true, data: clearAllEntriesData() });
-    }
-
+    // ملاحظة أمنية: clearAllEntriesData كان يتنفّذ هون قبل التحقق من الجلسة — أي حد
+    // عنده رابط /exec كان يقدر يمسح كل بيانات الإدخال بكبسة، بدون تسجيل دخول.
+    // هلأ بيمر من نفس مسار باقي الأفعال تحت: جلسة صالحة + دور مالك.
     var employee = requireSession_(body.token);
     var data;
     switch (body.action) {
@@ -441,7 +461,7 @@ function changePin(employee, p) {
   if (!/^\d{4,8}$/.test(newPin)) throw new Error('الرقم الجديد لازم يكون من 4 لـ 8 أرقام');
   if (currentPin === newPin) throw new Error('الرقم الجديد نفس القديم');
 
-  var r = readRows(SHEET_NAMES.EMPLOYEES);
+  var r = readRows(SHEET_NAMES.EMPLOYEES, true);
   var idx = -1;
   for (var i = 0; i < r.rows.length; i++) { if (r.rows[i].id === employee.id) { idx = i; break; } }
   if (idx === -1) throw new Error('ما لقينا حسابك');
@@ -452,6 +472,7 @@ function changePin(employee, p) {
   if (taken) throw new Error('الرقم مستخدم من موظف تاني — اختر رقم غيره');
 
   r.sh.getRange(idx + 2, r.headers.indexOf('pin') + 1).setValue(hashPin_(newPin));
+  invalidateSheet_(SHEET_NAMES.EMPLOYEES);
 
   // كل الجلسات القديمة بتنلغى — لو حدا كان داخل برقمك القديم بينطرد
   deleteRowsWhere(SHEET_NAMES.SESSIONS, function (row) { return row.employeeId === employee.id; });
@@ -575,7 +596,31 @@ function normalizeUnitValue(v) {
   return v;
 }
 
-function readRows(name) {
+// ---- كاش قراءة قصير الأمد ----
+// ليش: كل طلب كان يقرأ الجداول كاملة من الشيت (نفس الجداول تتقري عشرات المرات
+// بالدقيقة الوحدة — جلسات، موظفين، إعدادات...). هالكاش بيخلي القراءات المتكررة
+// خلال نافذة قصيرة تجي مجاناً، وأي كتابة من التطبيق بتلغي كاش الجدول فوراً فأي
+// قراءة بعدها بترجع طازجة. القيمة صفر = معطّل. الجداول الكبيرة أوتوماتيكياً ما
+// بتتخزن (الحد 100KB لكل مفتاح بالـ CacheService).
+var READ_CACHE_SECONDS = 30;
+
+function rowsCacheKey_(name) { return 'ph_rows_' + name; }
+
+function invalidateSheet_(name) {
+  if (READ_CACHE_SECONDS <= 0) return;
+  try { CacheService.getScriptCache().remove(rowsCacheKey_(name)); } catch (e) { /* الكاش مو ضروري — أقصى شي بيانات أقدم من نص دقيقة */ }
+}
+
+function invalidateAllSheets_() {
+  if (READ_CACHE_SECONDS <= 0) return;
+  try {
+    var keys = Object.keys(SHEET_NAMES).map(function (k) { return rowsCacheKey_(SHEET_NAMES[k]); });
+    CacheService.getScriptCache().removeAll(keys);
+  } catch (e) { /* تجاهل — نفس فوق */ }
+}
+
+// قراءة طازجة دايماً من الشيت — تُستعمل بمسارات الكتابة (لأن قرار الكتابة ما بيصح يبني على كاش)
+function readRowsFresh_(name) {
   var sh = sheet(name);
   var values = sh.getDataRange().getValues();
   var headers = values[0];
@@ -592,24 +637,181 @@ function readRows(name) {
   return { sh: sh, headers: headers, rows: rows };
 }
 
-function appendRow(name, obj) {
-  var sh = sheet(name);
-  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  var row = headers.map(function (h) { return obj.hasOwnProperty(h) ? obj[h] : ''; });
-  sh.appendRow(row);
+function readRows(name, fresh) {
+  if (!fresh && READ_CACHE_SECONDS > 0) {
+    try {
+      var hit = CacheService.getScriptCache().get(rowsCacheKey_(name));
+      if (hit) {
+        var parsed = JSON.parse(hit);
+        return { sh: sheet(name), headers: parsed.headers, rows: parsed.rows };
+      }
+    } catch (e) { /* كاش تالف؟ بنكمل بقراءة طازجة */ }
+  }
+  var result = readRowsFresh_(name);
+  if (READ_CACHE_SECONDS > 0) {
+    try {
+      var payload = JSON.stringify({ headers: result.headers, rows: result.rows });
+      if (payload.length <= 90000) { // حد CacheService هو 100KB لكل مفتاح — منترك هامش
+        CacheService.getScriptCache().put(rowsCacheKey_(name), payload, READ_CACHE_SECONDS);
+      }
+    } catch (e) { /* الجدول كبير للكاش — بنكمل عادي */ }
+  }
+  return result;
 }
 
+// كتابة صفوف جديدة كمجموعة وحدة: قراءة هيدر واحد + setValues واحد
+// (قبل هيك: appendRow لكل صف لحاله — 30 صنف = 30+ نداء للشيت)
+function appendRows_(name, objs) {
+  if (!objs || !objs.length) return;
+  var sh = sheet(name);
+  var headers = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
+  var rows = objs.map(function (obj) {
+    return headers.map(function (h) { return obj.hasOwnProperty(h) ? obj[h] : ''; });
+  });
+  invalidateSheet_(name);
+  var start = Math.max(sh.getLastRow() + 1, 2);
+  sh.getRange(start, 1, rows.length, headers.length).setValues(rows);
+}
+
+function appendRow(name, obj) { appendRows_(name, [obj]); }
+
+// حذف الصفوف المطابقة: قراءة واحدة + حذف كل مجموعة صفوف متتالية بنداء deleteRows واحد
+// (قبل هيك: deleteRow لكل صف لحاله — 30 صف = 30 نداء)
 function deleteRowsWhere(name, predicate) {
   var sh = sheet(name);
   var values = sh.getDataRange().getValues();
+  if (values.length < 2) return;
   var headers = values[0];
   var dateCol = headers.indexOf('date');
-  for (var i = values.length - 1; i >= 1; i--) {
+  var matches = [];
+  for (var i = 1; i < values.length; i++) {
     var row = {};
     for (var c = 0; c < headers.length; c++) row[headers[c]] = values[i][c];
     if (dateCol >= 0) row.date = normalizeDateValue(row.date);
-    if (predicate(row)) sh.deleteRow(i + 1);
+    if (predicate(row)) matches.push(i + 1); // رقم الصف الفعلي بالشيت
   }
+  if (!matches.length) return;
+  invalidateSheet_(name);
+  // من الأسفل لفوق حتى أرقام الصفوف فوق ما تتأثر بالحذف
+  var end = matches[matches.length - 1];
+  var start = end;
+  for (var k = matches.length - 2; k >= 0; k--) {
+    if (matches[k] === start - 1) {
+      start = matches[k];
+    } else {
+      sh.deleteRows(start, end - start + 1);
+      end = matches[k];
+      start = end;
+    }
+  }
+  sh.deleteRows(start, end - start + 1);
+}
+
+// يطبّق حقول معيّنة على صف مصفوفة حسب أسماء الأعمدة
+function applyFields_(row, headers, fields) {
+  Object.keys(fields).forEach(function (h) {
+    var c = headers.indexOf(h);
+    if (c >= 0) row[c] = fields[h];
+  });
+  return row;
+}
+
+// يكتب الصفوف المحددة كمجموعات متتالية — نداء setValues واحد لكل مجموعة
+function writeRuns_(sh, values, indexes) {
+  if (!indexes.length) return;
+  indexes = indexes.slice().sort(function (a, b) { return a - b; });
+  var start = indexes[0];
+  var prev = indexes[0];
+  for (var k = 1; k <= indexes.length; k++) {
+    var cur = indexes[k];
+    if (k < indexes.length && cur === prev + 1) { prev = cur; continue; }
+    var chunk = values.slice(start, prev + 1);
+    sh.getRange(start + 2, 1, chunk.length, chunk[0].length).setValues(chunk);
+    if (k < indexes.length) { start = cur; prev = cur; }
+  }
+}
+
+// upsert لصفوف يوم+فرع: بيحدّث صف الصنف الموجود (نفس التاريخ والفرع) وبيضيف صنف
+// جديد بس إذا ما كان إله صف — بدون أي حذف. هاي الدالة بتخلي شاشتي الاستلام والمتبقي
+// يكتبوا على نفس صفوف اليوم بدل ما يتصارعوا: الاستلام بيحدّث حقوله والمتبقي حقوله.
+function upsertDayItems_(name, date, branch, items) {
+  var sh = sheet(name);
+  var lastRow = sh.getLastRow();
+  var width = Math.max(sh.getLastColumn(), 1);
+  var all = sh.getRange(1, 1, Math.max(lastRow, 1), width).getValues();
+  var headers = all[0];
+  var values = all.slice(1);
+
+  var dateIdx = headers.indexOf('date');
+  var branchIdx = headers.indexOf('branch');
+  var itemIdx = headers.indexOf('itemId');
+
+  var byItem = {};
+  for (var i = 0; i < values.length; i++) {
+    var same = String(normalizeDateValue(values[i][dateIdx])) === String(date) &&
+               String(values[i][branchIdx]) === String(branch);
+    var iv = values[i][itemIdx];
+    if (same && iv !== '' && iv !== null && iv !== undefined) byItem[String(iv)] = i;
+  }
+
+  var changed = [];
+  var fresh = [];
+  (items || []).forEach(function (it) {
+    var idx = byItem[String(it.itemId)];
+    if (idx === undefined) {
+      var row = headers.map(function () { return ''; });
+      row[dateIdx] = date;
+      row[branchIdx] = branch;
+      row[itemIdx] = it.itemId;
+      fresh.push(applyFields_(row, headers, it.fields));
+    } else {
+      values[idx] = applyFields_(values[idx], headers, it.fields);
+      changed.push(idx);
+    }
+  });
+
+  if (!changed.length && !fresh.length) return;
+  invalidateSheet_(name);
+  writeRuns_(sh, values, changed);
+  if (fresh.length) sh.getRange(Math.max(lastRow + 1, 2), 1, fresh.length, headers.length).setValues(fresh);
+}
+
+// upsert لصف اليوم في DayMeta — نفس فكرة upsertDayItems_
+function upsertDayMeta_(p, savedAt) {
+  var name = SHEET_NAMES.DAYMETA;
+  var sh = sheet(name);
+  var lastRow = sh.getLastRow();
+  var width = Math.max(sh.getLastColumn(), 1);
+  var all = sh.getRange(1, 1, Math.max(lastRow, 1), width).getValues();
+  var headers = all[0];
+  var values = all.slice(1);
+
+  var dateIdx = headers.indexOf('date');
+  var branchIdx = headers.indexOf('branch');
+  var fields = {
+    employeeName: p.employeeName || '',
+    salesReportLink: p.salesReportLink || '',
+    paymentsReportLink: p.paymentsReportLink || ''
+  };
+
+  for (var i = 0; i < values.length; i++) {
+    if (String(normalizeDateValue(values[i][dateIdx])) === String(p.date) && String(values[i][branchIdx]) === String(p.branch)) {
+      var row = values[i];
+      var saIdx = headers.indexOf('savedAt');
+      var uaIdx = headers.indexOf('updatedAt');
+      if (saIdx >= 0 && !row[saIdx]) row[saIdx] = savedAt;
+      if (uaIdx >= 0) row[uaIdx] = savedAt;
+      row = applyFields_(row, headers, fields);
+      invalidateSheet_(name);
+      sh.getRange(i + 2, 1, 1, headers.length).setValues([row]);
+      return;
+    }
+  }
+  appendRows_(name, [{
+    date: p.date, branch: p.branch, employeeName: fields.employeeName,
+    salesReportLink: fields.salesReportLink, paymentsReportLink: fields.paymentsReportLink,
+    savedAt: savedAt, updatedAt: savedAt
+  }]);
 }
 
 function nowIso() { return new Date().toISOString(); }
@@ -635,7 +837,7 @@ function getItems(all) {
 }
 
 function saveItem(p) {
-  var r = readRows(SHEET_NAMES.ITEMS);
+  var r = readRows(SHEET_NAMES.ITEMS, true); // قرار كتابة — قراءة طازجة مش من الكاش
   if (!p.id) p.id = Utilities.getUuid();
   // isNew = لا يوجد صف بهذا الـ id حالياً (يدعم إنشاء id على العميل أثناء العمل أوفلاين)
   var isNew = !r.rows.some(function (row) { return row.id === p.id; });
@@ -647,13 +849,16 @@ function saveItem(p) {
       sortOrder: p.sortOrder || 0, updatedAt: p.updatedAt
     });
   } else {
-    var idx = r.headers.indexOf('id');
     for (var i = 0; i < r.rows.length; i++) {
       if (r.rows[i].id === p.id) {
+        // صف كامل بنداء واحد بدل 9 نداءات setValue عمود-عمود
         var rowNum = i + 2;
-        r.headers.forEach(function (h, c) {
-          if (p.hasOwnProperty(h)) r.sh.getRange(rowNum, c + 1).setValue(p[h]);
+        var rowVals = r.headers.map(function (h) {
+          if (p.hasOwnProperty(h)) return p[h];
+          return r.rows[i][h] === undefined ? '' : r.rows[i][h];
         });
+        invalidateSheet_(SHEET_NAMES.ITEMS);
+        r.sh.getRange(rowNum, 1, 1, r.headers.length).setValues([rowVals]);
         break;
       }
     }
@@ -662,14 +867,17 @@ function saveItem(p) {
 }
 
 function deleteItem(p) {
-  var r = readRows(SHEET_NAMES.ITEMS);
+  var r = readRows(SHEET_NAMES.ITEMS, true);
   for (var i = 0; i < r.rows.length; i++) {
     if (r.rows[i].id === p.id) {
       var rowNum = i + 2;
-      var activeCol = r.headers.indexOf('active') + 1;
-      var updatedCol = r.headers.indexOf('updatedAt') + 1;
-      r.sh.getRange(rowNum, activeCol).setValue(false);
-      r.sh.getRange(rowNum, updatedCol).setValue(nowIso());
+      var rowVals = r.headers.map(function (h) {
+        if (h === 'active') return false;
+        if (h === 'updatedAt') return nowIso();
+        return r.rows[i][h] === undefined ? '' : r.rows[i][h];
+      });
+      invalidateSheet_(SHEET_NAMES.ITEMS);
+      r.sh.getRange(rowNum, 1, 1, r.headers.length).setValues([rowVals]);
       break;
     }
   }
@@ -685,31 +893,21 @@ function getDay(date, branch) {
 }
 
 function saveDay(p) {
-  // full replace لنفس التاريخ + نفس الفرع فقط (كل فرع مستقل، ما بيمسح فروع تانية بنفس اليوم)
-  deleteRowsWhere(SHEET_NAMES.DAILY, function (row) { return row.date === p.date && row.branch === p.branch; });
+  // upsert على صفوف نفس اليوم+الفرع: كل صنف بينحدّث صفه (أو بينضاف إذا جديد) ومو
+  // بينمسح أي صف — فحفظ الاستلام ما بيمسح بيانات المتبقي المحفوظة لنفس اليوم (والعكس)،
+  // ولا منكرر صفوف. هذا كان أساس مشكلة تضاعف الجدول وبطء الحفظ.
   var savedAt = nowIso();
-  (p.items || []).forEach(function (it) {
-    appendRow(SHEET_NAMES.DAILY, {
-      date: p.date, branch: p.branch, itemId: it.itemId, itemName: it.itemName, unit: it.unit,
-      confirmed: !!it.confirmed, received: it.received, returned: it.returned, cookName: it.cookName || '',
-      notes: it.notes || '', savedAt: savedAt
-    });
-  });
-
-  var metaRows = readRows(SHEET_NAMES.DAYMETA);
-  var existing = metaRows.rows.filter(function (r) { return r.date === p.date && r.branch === p.branch; })[0];
-  var metaObj = {
-    date: p.date, branch: p.branch, employeeName: p.employeeName || '',
-    salesReportLink: p.salesReportLink || '', paymentsReportLink: p.paymentsReportLink || '',
-    savedAt: existing ? existing.savedAt : savedAt, updatedAt: savedAt
-  };
-  if (existing) {
-    var idx2 = metaRows.rows.indexOf(existing);
-    var rowNum2 = idx2 + 2;
-    metaRows.headers.forEach(function (h, c) { metaRows.sh.getRange(rowNum2, c + 1).setValue(metaObj[h]); });
-  } else {
-    appendRow(SHEET_NAMES.DAYMETA, metaObj);
-  }
+  upsertDayItems_(SHEET_NAMES.DAILY, p.date, p.branch, (p.items || []).map(function (it) {
+    return {
+      itemId: it.itemId,
+      fields: {
+        itemName: it.itemName, unit: it.unit, confirmed: !!it.confirmed,
+        received: it.received, returned: it.returned, cookName: it.cookName || '',
+        notes: it.notes || '', savedAt: savedAt
+      }
+    };
+  }));
+  upsertDayMeta_(p, savedAt);
 
   // تنبيه الإرجاع المرتفع — ما بيوقف الحفظ لو فشل الإرسال (الحفظ أهم من الإشعار)
   try { checkAndSendReturnAlert_(p); } catch (e) { Logger.log('return alert failed: ' + e); }
@@ -780,12 +978,12 @@ function getTomorrowOrder(date, branch) {
 function saveTomorrowOrder(p) {
   deleteRowsWhere(SHEET_NAMES.TOMORROW, function (row) { return row.date === p.date && row.branch === p.branch; });
   var savedAt = nowIso();
-  (p.items || []).forEach(function (it) {
-    appendRow(SHEET_NAMES.TOMORROW, {
+  appendRows_(SHEET_NAMES.TOMORROW, (p.items || []).map(function (it) {
+    return {
       date: p.date, branch: p.branch, itemId: it.itemId, itemName: it.itemName, unit: it.unit,
       qty: it.qty, notes: it.notes || '', employeeName: p.employeeName || '', savedAt: savedAt
-    });
-  });
+    };
+  }));
 
   // p.notify بتنبعت بس لما الموظف يضغط زر "حفظ الطلبية" — مو مع الحفظ التلقائي
   if (p.notify) {
@@ -801,9 +999,9 @@ function saveTomorrowOrder(p) {
 function importSalesByCategory(p) {
   deleteRowsWhere(SHEET_NAMES.TABSENSE, function (row) { return row.date === p.date && row.branch === p.branch; });
   var importedAt = nowIso();
-  (p.rows || []).forEach(function (r) {
-    appendRow(SHEET_NAMES.TABSENSE, { date: p.date, branch: p.branch, category: r.category, qty: r.qty, importedAt: importedAt });
-  });
+  appendRows_(SHEET_NAMES.TABSENSE, (p.rows || []).map(function (r) {
+    return { date: p.date, branch: p.branch, category: r.category, qty: r.qty, importedAt: importedAt };
+  }));
   return { date: p.date, branch: p.branch, count: (p.rows || []).length, importedAt: importedAt };
 }
 
@@ -830,14 +1028,14 @@ function saveWasteReport(p) {
     return row.date === p.date && row.branch === p.branch;
   });
   var savedAt = nowIso();
-  (p.items || []).forEach(function (it) {
-    appendRow(SHEET_NAMES.WASTE, {
+  appendRows_(SHEET_NAMES.WASTE, (p.items || []).map(function (it) {
+    return {
       date: p.date, branch: p.branch, id: it.id || '',
       itemId: it.itemId || '', itemName: it.itemName || '', unit: it.unit || '',
       qty: it.qty, reason: it.reason || '', notes: it.notes || '',
       employeeName: it.employeeName || '', timestamp: it.timestamp || '', savedAt: savedAt
-    });
-  });
+    };
+  }));
   return { date: p.date, branch: p.branch, count: (p.items || []).length, savedAt: savedAt };
 }
 
@@ -863,7 +1061,7 @@ function getJuices(all) {
 }
 
 function saveJuice(p) {
-  var r = readRows(SHEET_NAMES.JUICES);
+  var r = readRows(SHEET_NAMES.JUICES, true);
   if (!p.id) p.id = Utilities.getUuid();
   var isNew = !r.rows.some(function (row) { return row.id === p.id; });
   p.updatedAt = nowIso();
@@ -876,9 +1074,12 @@ function saveJuice(p) {
     for (var i = 0; i < r.rows.length; i++) {
       if (r.rows[i].id === p.id) {
         var rowNum = i + 2;
-        r.headers.forEach(function (h, c) {
-          if (p.hasOwnProperty(h)) r.sh.getRange(rowNum, c + 1).setValue(p[h]);
+        var juRow = r.headers.map(function (h) {
+          if (p.hasOwnProperty(h)) return p[h];
+          return r.rows[i][h] === undefined ? '' : r.rows[i][h];
         });
+        invalidateSheet_(SHEET_NAMES.JUICES);
+        r.sh.getRange(rowNum, 1, 1, r.headers.length).setValues([juRow]);
         break;
       }
     }
@@ -887,11 +1088,17 @@ function saveJuice(p) {
 }
 
 function deleteJuice(p) {
-  var r = readRows(SHEET_NAMES.JUICES);
+  var r = readRows(SHEET_NAMES.JUICES, true);
   for (var i = 0; i < r.rows.length; i++) {
     if (r.rows[i].id === p.id) {
-      r.sh.getRange(i + 2, r.headers.indexOf('active') + 1).setValue(false);
-      r.sh.getRange(i + 2, r.headers.indexOf('updatedAt') + 1).setValue(nowIso());
+      var rowNum = i + 2;
+      var juRow = r.headers.map(function (h) {
+        if (h === 'active') return false;
+        if (h === 'updatedAt') return nowIso();
+        return r.rows[i][h] === undefined ? '' : r.rows[i][h];
+      });
+      invalidateSheet_(SHEET_NAMES.JUICES);
+      r.sh.getRange(rowNum, 1, 1, r.headers.length).setValues([juRow]);
       break;
     }
   }
@@ -918,13 +1125,13 @@ function getJuiceDay(date, branch) {
 function saveJuiceDay(p) {
   deleteRowsWhere(SHEET_NAMES.JUICE_COUNTS, function (row) { return row.date === p.date && row.branch === p.branch; });
   var savedAt = nowIso();
-  (p.items || []).forEach(function (it) {
-    appendRow(SHEET_NAMES.JUICE_COUNTS, {
+  appendRows_(SHEET_NAMES.JUICE_COUNTS, (p.items || []).map(function (it) {
+    return {
       date: p.date, branch: p.branch, juiceId: it.juiceId, juiceName: it.juiceName, unit: it.unit || '',
       opening: it.opening, added: it.added, sold: it.sold, counted: it.counted,
       notes: it.notes || '', employeeName: p.employeeName || '', savedAt: savedAt
-    });
-  });
+    };
+  }));
   return { date: p.date, branch: p.branch, savedAt: savedAt };
 }
 
@@ -932,9 +1139,9 @@ function saveJuiceDay(p) {
 function importJuiceSales(p) {
   deleteRowsWhere(SHEET_NAMES.JUICE_SALES, function (row) { return row.date === p.date && row.branch === p.branch; });
   var importedAt = nowIso();
-  (p.rows || []).forEach(function (r) {
-    appendRow(SHEET_NAMES.JUICE_SALES, { date: p.date, branch: p.branch, productName: r.productName, qty: r.qty, importedAt: importedAt });
-  });
+  appendRows_(SHEET_NAMES.JUICE_SALES, (p.rows || []).map(function (r) {
+    return { date: p.date, branch: p.branch, productName: r.productName, qty: r.qty, importedAt: importedAt };
+  }));
   return { date: p.date, branch: p.branch, count: (p.rows || []).length, importedAt: importedAt };
 }
 
@@ -990,39 +1197,48 @@ function getSettingsForClient_(employee) {
 }
 
 function saveSettings(p) {
-  var r = readRows(SHEET_NAMES.SETTINGS);
+  var r = readRows(SHEET_NAMES.SETTINGS, true);
+  var toAppend = [];
   Object.keys(p).forEach(function (key) {
     var existingIdx = -1;
     for (var i = 0; i < r.rows.length; i++) { if (r.rows[i].key === key) { existingIdx = i; break; } }
     if (existingIdx >= 0) {
       var rowNum = existingIdx + 2;
-      var valueCol = r.headers.indexOf('value') + 1;
-      var updatedCol = r.headers.indexOf('updatedAt') + 1;
-      r.sh.getRange(rowNum, valueCol).setValue(p[key]);
-      if (updatedCol > 0) r.sh.getRange(rowNum, updatedCol).setValue(nowIso());
+      var rowVals = r.headers.map(function (h) {
+        if (h === 'value') return p[key];
+        if (h === 'updatedAt') return nowIso();
+        return r.rows[existingIdx][h] === undefined ? '' : r.rows[existingIdx][h];
+      });
+      invalidateSheet_(SHEET_NAMES.SETTINGS);
+      r.sh.getRange(rowNum, 1, 1, r.headers.length).setValues([rowVals]);
     } else {
-      appendRow(SHEET_NAMES.SETTINGS, { key: key, value: p[key], updatedAt: nowIso() });
+      toAppend.push({ key: key, value: p[key], updatedAt: nowIso() });
     }
   });
+  if (toAppend.length) appendRows_(SHEET_NAMES.SETTINGS, toAppend);
   return getSettings();
 }
 
 // ==================== Backup / Restore ====================
 
 function backupAll() {
-  return {
-    items: readRows(SHEET_NAMES.ITEMS).rows,
-    dailyEntries: readRows(SHEET_NAMES.DAILY).rows,
-    dayMeta: readRows(SHEET_NAMES.DAYMETA).rows,
-    tomorrowOrders: readRows(SHEET_NAMES.TOMORROW).rows,
-    employees: readRows(SHEET_NAMES.EMPLOYEES).rows,
-    tabsenseSales: readRows(SHEET_NAMES.TABSENSE).rows,
-    juices: readRows(SHEET_NAMES.JUICES).rows,
-    juiceCounts: readRows(SHEET_NAMES.JUICE_COUNTS).rows,
-    juiceSales: readRows(SHEET_NAMES.JUICE_SALES).rows,
-    settings: readRows(SHEET_NAMES.SETTINGS).rows,
-    exportedAt: nowIso()
+  // نسخة احتياطية من كاش عمره نص دقيقة؟ لا — قراءة طازجة دايمًا
+  var map = {
+    items: SHEET_NAMES.ITEMS,
+    dailyEntries: SHEET_NAMES.DAILY,
+    dayMeta: SHEET_NAMES.DAYMETA,
+    tomorrowOrders: SHEET_NAMES.TOMORROW,
+    employees: SHEET_NAMES.EMPLOYEES,
+    tabsenseSales: SHEET_NAMES.TABSENSE,
+    juices: SHEET_NAMES.JUICES,
+    juiceCounts: SHEET_NAMES.JUICE_COUNTS,
+    juiceSales: SHEET_NAMES.JUICE_SALES,
+    settings: SHEET_NAMES.SETTINGS
   };
+  var out = {};
+  Object.keys(map).forEach(function (k) { out[k] = readRowsFresh_(map[k]).rows; });
+  out.exportedAt = nowIso();
+  return out;
 }
 
 // ==================== نسخ احتياطي تلقائي مجدول (يومي) على Google Drive ====================
@@ -1118,7 +1334,7 @@ function moveDayData_(dryRun) {
   var totalDeleted = 0, totalMoved = 0;
 
   moveDayTables_().forEach(function (name) {
-    var r = readRows(name);
+    var r = readRows(name, true);
     var willDelete = 0, willMove = 0;
     r.rows.forEach(function (row) {
       if (String(row.branch) !== MOVE_BRANCH) return;
@@ -1145,7 +1361,7 @@ function moveDayData_(dryRun) {
         });
       }
       if (willMove) {
-        var r2 = readRows(name);
+        var r2 = readRows(name, true);
         var dateCol = r2.headers.indexOf('date') + 1;
         for (var i = 0; i < r2.rows.length; i++) {
           if (String(r2.rows[i].branch) === MOVE_BRANCH && r2.rows[i].date === MOVE_FROM) {
@@ -1160,6 +1376,8 @@ function moveDayData_(dryRun) {
     lines.push(name + ': حذف ' + willDelete + ' صف، نقل ' + willMove + ' صف');
   });
 
+  if (!dryRun) invalidateAllSheets_(); // تغيّرت بيانات — كاش القراءة انتهى
+
   lines.push('');
   lines.push('الإجمالي: حذف ' + totalDeleted + ' — نقل ' + totalMoved);
   if (dryRun) lines.push('ما تغيّر شي. شغّل moveDayDataApply للتنفيذ.');
@@ -1172,8 +1390,9 @@ function moveDayData_(dryRun) {
 function restoreAll(p) {
   function replaceSheet(name, rows) {
     var sh = sheet(name);
-    var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    var headers = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
     var lastRow = sh.getLastRow();
+    invalidateSheet_(name);
     if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, headers.length).clearContent();
     if (!rows || !rows.length) return;
     var values = rows.map(function (obj) { return headers.map(function (h) { return obj.hasOwnProperty(h) ? obj[h] : ''; }); });
@@ -1394,6 +1613,7 @@ function clearSheetDataRows_(sheetName) {
     var s = sheet(sheetName);
     var lastRow = s.getLastRow();
     if (lastRow > 1) {
+      invalidateSheet_(sheetName);
       s.getRange(2, 1, lastRow - 1, s.getLastColumn()).clearContent();
     }
   } catch (e) {
@@ -1408,13 +1628,110 @@ function getRemainingReport(date, branch) {
 }
 
 function saveRemainingReport(p) {
+  // كان هون الباك اند يضيف صفوف جديدة فوق صفوف يوم موجودة أصلاً بنفس الجدول: بينتج
+  // صف مكرر لكل صنف (واحد للاستلام وواحد للمتبقي)، والأسوأ إن صف المتبقي الفاضي من
+  // حقول الاستلام بيغطي على قيم الاستلام بالعرض. هلأ القيمتين بينحدّثوا على نفس الصف.
   var savedAt = nowIso();
-  (p.items || []).forEach(function (it) {
-    appendRow(SHEET_NAMES.DAILY, {
-      date: p.date, branch: p.branch, itemId: it.itemId, itemName: it.itemName, unit: it.unit,
-      remaining: it.remaining, remainingWeight: it.remainingWeight, remainingSauce: it.remainingSauce,
-      notes: it.notes || '', savedAt: savedAt
-    });
-  });
+  upsertDayItems_(SHEET_NAMES.DAILY, p.date, p.branch, (p.items || []).map(function (it) {
+    return {
+      itemId: it.itemId,
+      fields: {
+        itemName: it.itemName, unit: it.unit,
+        remaining: it.remaining, remainingWeight: it.remainingWeight, remainingSauce: it.remainingSauce,
+        notes: it.notes || '', savedAt: savedAt
+      }
+    };
+  }));
   return { date: p.date, branch: p.branch, savedAt: savedAt };
+}
+
+// ==================== نقطة تجميع للداشبورد ====================
+// قبل هيك كانت الواجهة تعمل ~17 نداء لفتح الرئيسية (لكل فرع: اليوم + أمس + طلبية
+// الغد + العصيرات، بالإضافة للتقرير). هون نداء واحد بيرجع بنفس الشكل اللي بتتوقعه
+// الواجهة بالضبط، وبقراءة وحدة للجداول الكبيرة إلا عدد الفروع بيسمح — فالبطء بينزل
+// من "دقائق" لثانية.
+function getDashboardData_(date, employee) {
+  var settings = getSettings();
+  var allBranches = (settings.branches || DEFAULT_BRANCHES).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  var seeAll = employee.role === 'owner' || employee.role === 'chef';
+  var branches = seeAll ? allBranches : allBranches.filter(function (b) { return employee.branches.indexOf(b) !== -1; });
+
+  var prevDate = addDaysIso_(date, -1);
+  var nextDate = addDaysIso_(date, 1);
+
+  var daily = readRows(SHEET_NAMES.DAILY).rows;
+  var metaRows = readRows(SHEET_NAMES.DAYMETA).rows;
+  var tomorrowRows = readRows(SHEET_NAMES.TOMORROW).rows;
+  var juiceCounts = readRows(SHEET_NAMES.JUICE_COUNTS).rows;
+  var juiceSales = readRows(SHEET_NAMES.JUICE_SALES).rows;
+  var showJuice = employee.role !== 'chef'; // شاشة العصيرات مخفية عن الشيف بالواجهة
+
+  function dayShape(d, b) {
+    return {
+      date: d,
+      branch: b,
+      meta: metaRows.filter(function (m) { return m.date === d && m.branch === b; })[0] || null,
+      items: daily.filter(function (r) { return r.date === d && r.branch === b; })
+    };
+  }
+
+  var out = {};
+  branches.forEach(function (b) {
+    var branchData = {
+      today: dayShape(date, b),
+      yesterday: dayShape(prevDate, b),
+      tomorrow: tomorrowRows.filter(function (r) { return r.date === nextDate && r.branch === b; })
+    };
+    if (showJuice) {
+      var prevCounted = {};
+      juiceCounts.filter(function (r) { return r.date === prevDate && r.branch === b; })
+        .forEach(function (r) { prevCounted[r.juiceId] = r.counted; });
+      branchData.juiceDay = {
+        date: date,
+        branch: b,
+        items: juiceCounts.filter(function (r) { return r.date === date && r.branch === b; }),
+        prevCounted: prevCounted,
+        sales: juiceSales.filter(function (r) { return r.date === date && r.branch === b; })
+          .map(function (r) { return { productName: r.productName, qty: r.qty }; })
+      };
+    } else {
+      branchData.juiceDay = null;
+    }
+    out[b] = branchData;
+  });
+
+  return { date: date, branches: out };
+}
+
+// أعلى نسب الإرجاع لفترة — نفس حساب getReport بس ما بيلمس مبيعات الكاشير ولا
+// العصيرات (ما إلها علاقة بالنسبة أصلاً)، فبيقرأ جدولين بدل أربعة.
+function getFlaggedItems_(start, end, branchFilter) {
+  var settings = getSettings();
+  var returnThreshold = settings.returnThresholdPct !== undefined && settings.returnThresholdPct !== ''
+    ? Number(settings.returnThresholdPct) : 0.30;
+
+  var entries = readRows(SHEET_NAMES.DAILY).rows.filter(function (r) { return r.date >= start && r.date <= end; });
+  if (branchFilter && branchFilter.length) {
+    entries = entries.filter(function (r) { return branchFilter.indexOf(r.branch) !== -1; });
+  }
+
+  var totalsMap = {};
+  entries.forEach(function (r) {
+    if (!totalsMap[r.itemId]) totalsMap[r.itemId] = { itemId: r.itemId, itemName: r.itemName, unit: r.unit, totalReceived: 0, totalReturned: 0, dayCount: 0 };
+    var t = totalsMap[r.itemId];
+    var rec = Number(r.received);
+    var ret = Number(r.returned);
+    if (!isNaN(rec) && r.received !== '') { t.totalReceived += rec; t.dayCount += 1; }
+    if (!isNaN(ret) && r.returned !== '') { t.totalReturned += ret; }
+  });
+
+  var flagged = [];
+  Object.keys(totalsMap).forEach(function (id) {
+    var t = totalsMap[id];
+    t.avgDaily = t.dayCount > 0 ? t.totalReceived / t.dayCount : null;
+    t.returnPct = t.totalReceived > 0 ? t.totalReturned / t.totalReceived : null;
+    t.flagged = t.returnPct !== null && t.returnPct >= returnThreshold;
+    if (t.flagged) flagged.push(t);
+  });
+  return flagged;
 }
