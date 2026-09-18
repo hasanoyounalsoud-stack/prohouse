@@ -122,7 +122,17 @@ function applyRoleUiGating() {
   }
 
   const emp = Auth.getEmployee();
-  document.getElementById("userBarName").textContent = emp ? emp.name : "";
+  const ROSTER_NAMES = {
+    emp_1: "أ.يزيد",
+    emp_2: "حسن",
+    emp_3: "الشيف عصام",
+    emp_4: "أبو يونس",
+    emp_5: "العامودي",
+    emp_6: "محمد البلول",
+    emp_7: "غالب"
+  };
+  const displayName = emp ? (ROSTER_NAMES[emp.id] || (emp.name && !emp.name.includes("?") ? emp.name : "موظف")) : "";
+  document.getElementById("userBarName").textContent = displayName;
   const roleEl = document.getElementById("userBarRole");
   if (roleEl) roleEl.textContent = "";
   document.getElementById("userBar").classList.remove("hidden");

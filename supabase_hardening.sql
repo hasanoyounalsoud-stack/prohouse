@@ -88,18 +88,18 @@ create or replace function public.login(p_pin text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public, pg_temp
-as $$
-declare
-  v_emp employees;
-  v_token text;
-  v_hash text;
-begin
-  if p_pin is null or btrim(p_pin) = '' then
-    raise exception 'أدخل الرقم السري';
-  end if;
+    set search_path = public, extensions, pg_temp
+    as $$
+    declare
+      v_emp employees;
+      v_token text;
+      v_hash text;
+    begin
+      if p_pin is null or btrim(p_pin) = '' then
+        raise exception 'أدخل الرقم السري';
+      end if;
 
-  v_hash := encode(digest('prohouse-2026-salt' || btrim(p_pin), 'sha256'), 'hex');
+      v_hash := encode(extensions.digest(('prohouse-2026-salt' || btrim(p_pin))::bytea, 'sha256'), 'hex');
 
   select * into v_emp
   from employees e
@@ -157,7 +157,7 @@ create or replace function public.change_pin(p_current text, p_new text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $$
 declare
   v_token text;
@@ -183,11 +183,11 @@ begin
   if p_current = p_new then
     raise exception 'الرقم الجديد نفس القديم';
   end if;
-  if v_emp.pin <> encode(digest('prohouse-2026-salt' || p_current, 'sha256'), 'hex') then
+  if v_emp.pin <> encode(extensions.digest(('prohouse-2026-salt' || p_current)::bytea, 'sha256'), 'hex') then
     raise exception 'الرقم الحالي غير صحيح';
   end if;
 
-  v_new_hash := encode(digest('prohouse-2026-salt' || p_new, 'sha256'), 'hex');
+  v_new_hash := encode(extensions.digest(('prohouse-2026-salt' || p_new)::bytea, 'sha256'), 'hex');
   if exists (select 1 from employees e2 where e2.pin = v_new_hash and e2.id <> v_emp.id) then
     raise exception 'الرقم مستخدم من موظف آخر — اختر رقم غيره';
   end if;

@@ -107,9 +107,19 @@ const Auth = (() => {
         const emp = res.ok ? await res.json() : null;
 
         if (emp && emp.id) {
+          const ROSTER_NAMES = {
+            emp_1: "أ.يزيد",
+            emp_2: "حسن",
+            emp_3: "الشيف عصام",
+            emp_4: "أبو يونس",
+            emp_5: "العامودي",
+            emp_6: "محمد البلول",
+            emp_7: "غالب"
+          };
+          const finalName = ROSTER_NAMES[emp.id] || (emp.name && !emp.name.includes("?") ? emp.name : "موظف");
           const formatted = {
             id: emp.id,
-            name: emp.name,
+            name: finalName,
             role: emp.role,
             branches: (emp.branches || "").split(",").map(s => s.trim()).filter(Boolean)
           };
