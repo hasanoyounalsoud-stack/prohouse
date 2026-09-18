@@ -90,3 +90,45 @@ async function loadRequestedQty(date, branch) {
   (data || []).forEach(it => { map[it.itemId] = it.qty; });
   return map;
 }
+
+// ---- وضع العرض المدمج بسطر واحد لتقليل السكرول للجوال (Compact View Mode) ----
+function isCompactMode() {
+  return localStorage.getItem("prohouse_compact_mode") === "true";
+}
+
+function toggleCompactMode() {
+  const next = !isCompactMode();
+  localStorage.setItem("prohouse_compact_mode", String(next));
+  applyCompactModeUI();
+  showToast(next ? "⚡ تم تفعيل العرض المدمج (سطر واحد)" : "📖 تم العودة للعرض الموسع");
+}
+
+function applyCompactModeUI() {
+  const active = isCompactMode();
+  document.body.classList.toggle("compact-mode", active);
+  document.querySelectorAll(".compact-toggle-btn").forEach(btn => {
+    btn.innerHTML = active 
+      ? "📖 التبديل للعرض الموسع" 
+      : "🗜️ عرض مدمج (تقليل السكرول)";
+    btn.classList.toggle("active", active);
+  });
+}
+
+function renderCompactToggleBtnHtml() {
+  const active = isCompactMode();
+  return `
+    <button type="button" class="btn compact-toggle-btn ${active ? 'active' : ''}" onclick="toggleCompactMode()" title="تبديل كثافة العرض لتقليل السكرول بالجوال">
+      ${active ? '📖 التبديل للعرض الموسع' : '🗜️ عرض مدمج (تقليل السكرول)'}
+    </button>
+  `;
+}
+
+// تطبيق الوضع المحفوظ فوراً عند تحميل الصفحة
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", applyCompactModeUI);
+  } else {
+    applyCompactModeUI();
+  }
+}
+

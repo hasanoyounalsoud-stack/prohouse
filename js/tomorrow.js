@@ -116,6 +116,7 @@ function renderTomorrowView() {
       <button type="button" class="tom-whatsapp-btn" onclick="exportTomorrowOrderWhatsApp()">
         📱 إرسال الطلبية للمطبخ (واتساب)
       </button>
+      ${renderCompactToggleBtnHtml()}
     </div>
 
     <!-- فلاتر سريعة للتركيز -->

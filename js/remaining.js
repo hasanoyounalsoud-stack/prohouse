@@ -244,6 +244,10 @@ function renderRemainingView(receivingData, salesData) {
         </div>
       </div>
 
+      <div class="rem-quick-actions-bar">
+        ${renderCompactToggleBtnHtml()}
+      </div>
+
       <div class="rem-filters-scroll">
         <button type="button" class="rem-filter-chip ${remainingActiveFilter === 'all' ? 'active' : ''}" data-filter="all" onclick="setRemainingFilter('all')">
           الكل (${totalItemsCount})

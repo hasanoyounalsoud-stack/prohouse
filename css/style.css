@@ -1845,4 +1845,191 @@ table.order-table td.total-cell{ font-weight:900; background:#FFF4D6; }
   margin-top: 2px;
 }
 
+/* ==========================================================================
+   وضع العرض المدمج بسطر واحد (Compact One-Line View Mode) لتقليل السكرول بالجوال
+   ========================================================================== */
+
+.compact-toggle-btn {
+  background: var(--card);
+  color: var(--black);
+  border: 2px solid var(--black);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 8px 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.8);
+}
+
+.compact-toggle-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.8);
+}
+
+.compact-toggle-btn.active {
+  background: #FFF9C4;
+  border-color: #FBC02D;
+  color: #5D4037;
+}
+
+/* --- تقليص الهيدر والفلاتر في الوضع المدمج --- */
+.compact-mode .receiving-mobile-header,
+.compact-mode .remaining-mobile-header,
+.compact-mode .tomorrow-mobile-header {
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  gap: 8px;
+}
+
+.compact-mode .rec-stat-pill,
+.compact-mode .rem-stat-pill {
+  padding: 4px;
+}
+
+.compact-mode .rec-stat-num,
+.compact-mode .rem-stat-num {
+  font-size: 14px;
+}
+
+.compact-mode .category-header {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+/* --- كروت الاستلام المدمجة (Compact Receiving Cards) --- */
+.compact-mode .receiving-item-card {
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  gap: 6px;
+  border-width: 1.5px;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.6);
+}
+
+.compact-mode .rec-card-header {
+  gap: 4px;
+}
+
+.compact-mode .rec-item-name {
+  font-size: 14px;
+}
+
+.compact-mode .rec-ordered-info-bar {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.compact-mode .rec-input-action-row {
+  gap: 6px;
+}
+
+.compact-mode .rec-main-input {
+  height: 38px;
+  font-size: 16px;
+  padding: 0 35px 0 8px;
+  border-radius: 8px;
+}
+
+.compact-mode .rec-input-unit-label {
+  font-size: 10px;
+  left: 6px;
+}
+
+.compact-mode .rec-btn-quick {
+  height: 38px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-radius: 8px;
+}
+
+.compact-mode .rec-stepper-chips-row,
+.compact-mode .rem-stepper-chips-row {
+  gap: 4px;
+}
+
+.compact-mode .rec-step-chip,
+.compact-mode .rem-step-chip {
+  height: 30px;
+  min-width: 44px;
+  font-size: 11px;
+  border-radius: 6px;
+  border-width: 1px;
+}
+
+.compact-mode .rec-live-diff-bar {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.compact-mode .rec-notes-toggle-wrap {
+  display: none;
+}
+
+/* --- كروت المتبقي والإغلاق المدمجة (Compact Remaining Cards) --- */
+.compact-mode .remaining-card-mobile {
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  gap: 6px;
+  border-width: 1.5px;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.6);
+}
+
+.compact-mode .rem-card-header {
+  gap: 4px;
+}
+
+.compact-mode .rem-item-name {
+  font-size: 14px;
+}
+
+.compact-mode .rem-dual-inputs-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.compact-mode .rem-sub-box {
+  padding: 6px 8px;
+  gap: 4px;
+}
+
+.compact-mode .rem-sub-header {
+  font-size: 11px;
+}
+
+.compact-mode .rem-variance-badge-bar {
+  padding: 4px 8px;
+  font-size: 10.5px;
+}
+
+/* --- كروت طلبية الغد المدمجة (Compact Tomorrow Order Cards) --- */
+.compact-mode .tomorrow-item-card {
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  gap: 6px;
+  border-width: 1.5px;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.6);
+}
+
+.compact-mode .tomorrow-item-card .rec-item-name {
+  font-size: 14px;
+}
+
+.compact-mode .tom-matrix-row {
+  padding: 4px 6px;
+  gap: 4px;
+}
+
+.compact-mode .tom-matrix-val {
+  font-size: 11px;
+}
+
+.compact-mode .tom-matrix-lbl {
+  font-size: 8.5px;
+}
+
+
 

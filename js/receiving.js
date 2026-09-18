@@ -180,6 +180,7 @@ function renderReceivingView() {
         <button type="button" class="btn rec-match-all-btn" onclick="onMatchAllReceiving()">
           ⚡ استلام الكل مطابق للمطلوب
         </button>
+        ${renderCompactToggleBtnHtml()}
       </div>
 
       <!-- فلاتر التركيز السريعة للجوال -->
