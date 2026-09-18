@@ -117,18 +117,19 @@ const Auth = (() => {
             emp_7: "غالب"
           };
           const finalName = ROSTER_NAMES[emp.id] || (emp.name && !emp.name.includes("?") ? emp.name : "موظف");
+          // موظفو فرع عبداللطيف جميل (محمد البلول وغالب) صلاحيتهم محصورة بالتشغيل وتسجيل البيانات فقط
+          const isBranchUser = emp.id === "emp_6" || emp.id === "emp_7" || emp.role === "employee" || emp.role === "branch_staff";
+          const finalRole = isBranchUser ? "branch_staff" : emp.role;
           const formatted = {
             id: emp.id,
             name: finalName,
-            role: emp.role,
+            role: finalRole,
             branches: (emp.branches || "").split(",").map(s => s.trim()).filter(Boolean)
           };
           setSession(token, formatted);
           return true;
         }
         if (res.ok) {
-          // السيرفر رد بوضوح: الجلسة القديمة ما عادت صالحة (مثلاً تسجيل دخول من
-          // النظام القديم) — منمسحها وبنطلب دخول من جديد بدل شاشات فاضية
           clearSession();
           return false;
         }
@@ -154,17 +155,19 @@ const Auth = (() => {
   function role() { const e = getEmployee(); return e ? e.role : null; }
   function branches() { const e = getEmployee(); return e ? (e.branches || []) : []; }
   function isOwner() { return role() === "owner"; }
+  function isBranchStaff() { return role() === "branch_staff" || role() === "employee"; }
   function canSeeAllBranches() { return role() === "owner" || role() === "chef"; }
   function canEditBranch(branch) { return canSeeAllBranches() || branches().includes(branch); }
   function isViewOnlyEntry() { return role() === "chef"; }
   function isViewOnlyTomorrow() { return role() === "chef"; }
-  function canSeeReports() { return role() === "owner" || role() === "manager" || role() === "chef"; }
-  function canManageItems() { return role() === "owner" || role() === "manager" || role() === "employee"; }
+  function canSeeReports() { return role() === "owner" || role() === "chef"; }
+  function canSeeFinancials() { return role() === "owner"; }
+  function canManageItems() { return role() === "owner"; }
   function canManageSettings() { return role() === "owner"; }
 
   return {
     getToken, getEmployee, isLoggedIn, login, logout, changePin, verify, clearSessionAndReload,
-    role, branches, isOwner, canSeeAllBranches, canEditBranch,
-    isViewOnlyEntry, isViewOnlyTomorrow, canSeeReports, canManageItems, canManageSettings
+    role, branches, isOwner, isBranchStaff, canSeeAllBranches, canEditBranch,
+    isViewOnlyEntry, isViewOnlyTomorrow, canSeeReports, canSeeFinancials, canManageItems, canManageSettings
   };
 })();

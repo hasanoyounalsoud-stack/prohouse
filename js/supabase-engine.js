@@ -81,12 +81,14 @@ const SupaEngine = (() => {
       emp_7: "غالب"
     };
     const finalName = ROSTER_NAMES[emp.id] || (emp.name && !emp.name.includes("?") ? emp.name : "موظف");
+    const isBranchUser = emp.id === "emp_6" || emp.id === "emp_7" || emp.role === "employee" || emp.role === "branch_staff";
+    const finalRole = isBranchUser ? "branch_staff" : emp.role;
     return {
       token: data.token,
       employee: {
         id: emp.id,
         name: finalName,
-        role: emp.role,
+        role: finalRole,
         branches: (emp.branches || "").split(",").map(s => s.trim()).filter(Boolean)
       }
     };

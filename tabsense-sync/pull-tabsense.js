@@ -80,9 +80,14 @@ function normalizeArabic(s) {
 async function sendToSupabase(rpcName, iso, branch, rows) {
   if (!config.supabaseUrl || !config.supabaseToken) return false;
   const url = String(config.supabaseUrl).replace(/\/$/, "") + "/rest/v1/rpc/" + rpcName;
+  const anonKey = config.supabaseAnonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNhZHRpbmZkd3Vjd3J4bG13eG92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NTM4MDgsImV4cCI6MjEwNTEyOTgwOH0.jMtjOIBQIuv0N0Q4ms9LJ5ys3h3lfakND4pVQXNbU2w";
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": anonKey,
+      "Authorization": "Bearer " + anonKey
+    },
     body: JSON.stringify({ p_token: config.supabaseToken, p_date: iso, p_branch: branch, p_rows: rows })
   });
   if (!res.ok) {
