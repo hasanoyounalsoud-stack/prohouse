@@ -180,6 +180,82 @@ async function renderDashboard() {
     healthBadge = { label: "🔴 يتطلب تدخل عاجل من الإدارة", class: "danger" };
   }
 
+  // إذا كان المستخدم موظف فرع (محمد البلول أو غالب)، نعرض لوحة مهام مبسطة ونظيفة تماماً
+  if (Auth.isBranchStaff()) {
+    view.innerHTML = `
+      <div class="dash-greeting">PRO HOUSE OPERATIONS — بوابة الموظف 👋</div>
+      <div class="dash-date">${new Date().toLocaleDateString("ar-SA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} — الوقت: ${new Date().toLocaleTimeString("ar-SA", { hour: '2-digit', minute: '2-digit' })}</div>
+
+      <div class="dash-staff-welcome" style="background:var(--card);border:2px solid var(--black);border-radius:var(--radius);padding:18px;margin-bottom:18px;box-shadow:var(--shadow);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+          <div>
+            <h2 style="margin:0;font-size:19px;font-weight:900;">👋 مرحباً، ${name}</h2>
+            <div class="sub-text">مهامك التشغيلية اليومية بفرع ${activeBranch}</div>
+          </div>
+          <span class="badge ok" style="font-size:13px;padding:6px 14px;">🏪 ${activeBranch}</span>
+        </div>
+      </div>
+
+      <div class="dash-staff-grid">
+        <!-- 1. استلام الصباح -->
+        <div class="dash-staff-card" onclick="setActiveTab('receiving')">
+          <div class="staff-card-top">
+            <span class="staff-card-icon">📦</span>
+            <span class="badge neutral">الصباح</span>
+          </div>
+          <h3 class="staff-card-title">استلام الطلبية الصباحية</h3>
+          <p class="staff-card-desc">تسجيل أوزان الدجاج واللحوم والمواد الواردة من المطبخ بلمسة واحدة</p>
+          <button type="button" class="btn staff-card-btn">تسجيل الاستلام ›</button>
+        </div>
+
+        <!-- 2. جرد المتبقي والإغلاق -->
+        <div class="dash-staff-card" onclick="setActiveTab('remaining')">
+          <div class="staff-card-top">
+            <span class="staff-card-icon">🌙</span>
+            <span class="badge neutral">المساء</span>
+          </div>
+          <h3 class="staff-card-title">جرد المتبقي والإغلاق</h3>
+          <p class="staff-card-desc">وزن متبقي الدجاج والبروتين وتسجيل كميات الصوصات عند الإغلاق</p>
+          <button type="button" class="btn staff-card-btn">تسجيل المتبقي ›</button>
+        </div>
+
+        <!-- 3. توثيق وافتتاح الفرع -->
+        <div class="dash-staff-card" onclick="setActiveTab('opening')">
+          <div class="staff-card-top">
+            <span class="staff-card-icon">📷</span>
+            <span class="badge neutral">3 جولات</span>
+          </div>
+          <h3 class="staff-card-title">توثيق الكاميرا والجاهزية</h3>
+          <p class="staff-card-desc">تصوير الفرع والنظافة والمعايير الصباحية والمسائية</p>
+          <button type="button" class="btn staff-card-btn">فتح الكاميرا ›</button>
+        </div>
+
+        <!-- 4. جرد العصيرات -->
+        <div class="dash-staff-card" onclick="setActiveTab('juices')">
+          <div class="staff-card-top">
+            <span class="staff-card-icon">🥤</span>
+            <span class="badge neutral">العدادات</span>
+          </div>
+          <h3 class="staff-card-title">جرد العصيرات</h3>
+          <p class="staff-card-desc">تسجيل أرقام عدادات مكائن العصيرات والعلب المستهلكة</p>
+          <button type="button" class="btn staff-card-btn">بدء جرد العصيرات ›</button>
+        </div>
+
+        <!-- 5. قائمة الفحص -->
+        <div class="dash-staff-card" onclick="setActiveTab('checklist')">
+          <div class="staff-card-top">
+            <span class="staff-card-icon">📋</span>
+            <span class="badge neutral">التشغيل</span>
+          </div>
+          <h3 class="staff-card-title">قائمة الفحص اليومية</h3>
+          <p class="staff-card-desc">متابعة بنود الجودة والصحة ودرجات الحرارة بالفرع</p>
+          <button type="button" class="btn staff-card-btn">متابعة الفحص ›</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   view.innerHTML = `
     <div class="dash-greeting">PRO HOUSE OPERATIONS CENTER 👋</div>
     <div class="dash-date">${new Date().toLocaleDateString("ar-EG", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} — الوقت الحالي: ${new Date().toLocaleTimeString("ar-SA", { hour: '2-digit', minute: '2-digit' })}</div>

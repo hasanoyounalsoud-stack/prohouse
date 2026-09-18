@@ -141,9 +141,13 @@ function renderReceivingView() {
           <span class="rec-date-subtitle">📅 تاريخ: ${currentReceivingDate}</span>
         </div>
         <div class="branch-selector-wrap">
-          <select id="receivingBranchSelect" onchange="onReceivingBranchChange(this.value)">
-            ${branchOptionsHtml(currentReceivingBranch)}
-          </select>
+          ${Auth.isBranchStaff() || allowedBranchList().length <= 1 ? `
+            <span class="badge neutral" style="font-size:13px;padding:6px 12px;font-weight:900;">🏪 ${currentReceivingBranch}</span>
+          ` : `
+            <select id="receivingBranchSelect" onchange="onReceivingBranchChange(this.value)">
+              ${branchOptionsHtml(currentReceivingBranch)}
+            </select>
+          `}
         </div>
       </div>
 

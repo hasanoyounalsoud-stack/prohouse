@@ -1,18 +1,18 @@
 // ==================== التنقل بين التابات + الإقلاع + تسجيل الدخول ====================
 
 const TAB_ROLE_ACCESS = {
-  dashboard: ["owner", "manager", "chef", "employee"],
-  branches: ["owner", "manager", "chef", "employee"],
-  opening: ["owner", "manager", "chef", "employee"],
-  closing: ["owner", "manager", "chef", "employee"],
-  inspection: ["owner", "manager", "chef", "employee"],
-  receiving: ["owner", "manager", "chef", "employee"],
-  remaining: ["owner", "manager", "chef", "employee"],
-  tomorrow: ["owner", "manager", "chef", "employee"],
-  juices: ["owner", "manager", "employee"],
-  checklist: ["owner", "manager", "chef", "employee"],
-  waste: ["owner", "manager", "chef", "employee"],
-  report: ["owner", "manager", "chef"],
+  dashboard: ["owner", "manager", "chef", "branch_staff", "employee"],
+  branches: ["owner", "manager", "chef"],
+  opening: ["owner", "manager", "chef", "branch_staff", "employee"],
+  closing: ["owner", "manager", "chef", "branch_staff", "employee"],
+  inspection: ["owner", "manager", "chef", "branch_staff", "employee"],
+  receiving: ["owner", "manager", "chef", "branch_staff", "employee"],
+  remaining: ["owner", "manager", "chef", "branch_staff", "employee"],
+  tomorrow: ["owner", "manager", "chef"],
+  juices: ["owner", "manager", "branch_staff", "employee"],
+  checklist: ["owner", "manager", "chef", "branch_staff", "employee"],
+  waste: ["owner", "manager", "chef"],
+  report: ["owner"],
   items: ["owner"],
   users: ["owner"],
   audit: ["owner"],
@@ -112,14 +112,19 @@ function applyRoleUiGating() {
     btn.classList.toggle("hidden", !tabAllowed(btn.dataset.tab));
   });
 
-  // إخفاء قسم "النظام والأمان" بالكامل عن الموظفين والمدراء
-  const isOwner = Auth.isOwner();
-  const sysGroup = document.querySelector(".nav-group-title:last-of-type");
-  if (sysGroup && !isOwner) {
-    sysGroup.style.display = "none";
-  } else if (sysGroup) {
-    sysGroup.style.display = "";
-  }
+  // إخفاء عناوين الأقسام الفارغة بالقائمة الجانبية تلقائياً
+  document.querySelectorAll(".nav-group-title").forEach(title => {
+    let next = title.nextElementSibling;
+    let hasVisibleChild = false;
+    while (next && !next.classList.contains("nav-group-title") && !next.classList.contains("sidebar-user")) {
+      if (next.classList.contains("tab-btn") && !next.classList.contains("hidden")) {
+        hasVisibleChild = true;
+        break;
+      }
+      next = next.nextElementSibling;
+    }
+    title.style.display = hasVisibleChild ? "" : "none";
+  });
 
   const emp = Auth.getEmployee();
   const ROSTER_NAMES = {

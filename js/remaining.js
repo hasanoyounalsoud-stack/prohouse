@@ -214,9 +214,13 @@ function renderRemainingView(receivingData, salesData) {
           <span class="rem-date-subtitle">📅 تاريخ: ${currentRemainingDate} | فرز دقيق بين الدجاج/اللحم والصوصات</span>
         </div>
         <div class="branch-closing-wrap" style="display:flex;gap:8px;align-items:center;">
-          <select id="remainingBranchSelect" onchange="onRemainingBranchChange(this.value)">
-            ${branchOptionsHtml(currentRemainingBranch)}
-          </select>
+          ${Auth.isBranchStaff() || allowedBranchList().length <= 1 ? `
+            <span class="badge neutral" style="font-size:13px;padding:6px 12px;font-weight:900;">🏪 ${currentRemainingBranch}</span>
+          ` : `
+            <select id="remainingBranchSelect" onchange="onRemainingBranchChange(this.value)">
+              ${branchOptionsHtml(currentRemainingBranch)}
+            </select>
+          `}
           ${isClosed ? `
             <span class="badge danger" style="font-size:13px;padding:8px 14px;">🔒 اليوم مغلق ومقتنع</span>
           ` : `
@@ -234,6 +238,7 @@ function renderRemainingView(receivingData, salesData) {
           <span class="rem-stat-num">${Math.round(grandTotalReceivedWeight)}g</span>
           <span class="rem-stat-lbl">المستلم صباحاً</span>
         </div>
+        ${!Auth.isBranchStaff() ? `
         <div class="rem-stat-pill">
           <span class="rem-stat-num">${Math.round(grandTotalSoldMeals)}</span>
           <span class="rem-stat-lbl">وجبات مباعة (تابسنس)</span>
@@ -242,6 +247,12 @@ function renderRemainingView(receivingData, salesData) {
           <span class="rem-stat-num">${Math.round(grandTotalWasteGrams)}g</span>
           <span class="rem-stat-lbl">إجمالي الفاقد/الهدر</span>
         </div>
+        ` : `
+        <div class="rem-stat-pill">
+          <span class="rem-stat-num">${Math.round(grandTotalActualRemainingWeight)}g</span>
+          <span class="rem-stat-lbl">إجمالي المتبقي الفعلي</span>
+        </div>
+        `}
       </div>
 
       <div class="rem-quick-actions-bar">
@@ -402,7 +413,7 @@ function renderRemainingView(receivingData, salesData) {
 
           </div>
 
-          ${itemVarianceText ? `
+          ${itemVarianceText && !Auth.isBranchStaff() ? `
             <div class="rem-variance-badge-bar">
               <span class="text-red font-bold">${itemVarianceText}</span>
               <span style="font-size:11px;color:var(--gray);">يرجى التأكد من الميزان أو إدراج ملاحظة</span>
@@ -442,7 +453,7 @@ function renderRemainingView(receivingData, salesData) {
         <div class="category-header" onclick="toggleRemainingCategory('${String(cat).replace(/'/g, "\\'")}')">
           <div class="cat-label">
             <span>${categoryIconSticker(cat)} ${cat}</span>
-            ${isMealCat ? `<span class="badge ${catBadge.class}" style="font-size:11px;margin-right:6px;">${catBadge.label}</span>` : ''}
+            ${isMealCat && !Auth.isBranchStaff() ? `<span class="badge ${catBadge.class}" style="font-size:11px;margin-right:6px;">${catBadge.label}</span>` : ''}
           </div>
           <span class="cat-count-badge">
             <span class="cat-count">${filledCount}/${catItems.length}</span>
