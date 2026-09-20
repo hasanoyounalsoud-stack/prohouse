@@ -32,7 +32,12 @@ function applyDashboardPayload(dash) {
   Object.keys(dash.branches).forEach(branch => {
     const b = dash.branches[branch];
     if (!b) return;
-    if (b.today) Sync.cacheSet("day:" + today + ":" + branch, b.today);
+    
+    // حماية التعديلات الحالية: لا نكتب فوق كاش اليوم إذا كان المستخدم بدأ يعبّيه محلياً
+    const existingDay = Sync.cacheGet ? Sync.cacheGet("day:" + today + ":" + branch) : null;
+    const hasLocalEdits = existingDay && existingDay.items && existingDay.items.some(i => i.received !== "" && i.received != null);
+    if (b.today && !hasLocalEdits) Sync.cacheSet("day:" + today + ":" + branch, b.today);
+
     if (b.yesterday) Sync.cacheSet("day:" + yesterday + ":" + branch, b.yesterday);
     if (b.tomorrow) Sync.cacheSet("tomorrow:" + tomorrow + ":" + branch, b.tomorrow);
     if (b.juiceDay) Sync.cacheSet("juiceday:" + today + ":" + branch, b.juiceDay);

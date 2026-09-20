@@ -62,6 +62,13 @@ const Sync = (() => {
               case "getChecklist": result = await SupaEngine.getChecklist(p.date, p.branch); break;
             }
             if (result !== null) {
+              // إذا كان الطلب هو getDay والبيانات المحلية تحتوي على قيم عبأها المستخدم ولم تُحفظ بعد بالسيرفر، لا نلغيها
+              if (action === "getDay" && cached && cached.value && cached.value.items) {
+                const localFilled = cached.value.items.filter(i => i.received !== "" && i.received != null);
+                if (localFilled.length > 0 && (!result.items || result.items.length === 0)) {
+                  return; // الحفاظ على بيانات المستخدم
+                }
+              }
               cacheSet(ck, result);
               if (onFresh) onFresh(result);
             }

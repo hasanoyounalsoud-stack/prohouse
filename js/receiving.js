@@ -61,6 +61,29 @@ async function loadReceivingData(date, branch) {
     }
   }
 
+  // 3) استعادة البيانات من طابور المزامنة المحلي (Sync Queue) إذا كان هناك حفظ معلّق
+  try {
+    const queue = Sync.getQueue ? Sync.getQueue() : [];
+    const pendingSave = queue.find(q => q.action === "saveDay" && q.payload && q.payload.date === currentReceivingDate && q.payload.branch === currentReceivingBranch);
+    if (pendingSave && Array.isArray(pendingSave.payload.items)) {
+      pendingSave.payload.items.forEach(it => {
+        if (it.received !== "" && it.received !== null && it.received !== undefined) {
+          currentReceivingData[it.itemId] = {
+            received: String(it.received),
+            notes: it.notes || (currentReceivingData[it.itemId]?.notes || ""),
+            cookName: it.cookName || (currentReceivingData[it.itemId]?.cookName || ""),
+            status: it.status || computeReceivingItemStatus(it.received, currentReceivingOrdered[it.itemId])
+          };
+        }
+      });
+      if (Array.isArray(pendingSave.payload.removedItemIds)) {
+        pendingSave.payload.removedItemIds.forEach(id => currentReceivingRemovedIds.add(id));
+      }
+    }
+  } catch (err) {
+    console.warn("Queue recovery note:", err);
+  }
+
   renderReceivingView();
 }
 
