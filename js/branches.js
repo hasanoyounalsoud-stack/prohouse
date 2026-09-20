@@ -181,7 +181,10 @@ async function renderOpeningView() {
           <h2>📷 التوثيق البصري والمراقبة الميدانية (3 مراحل يومياً)</h2>
           <div class="sub-text">فرع: <strong>${branch}</strong> | التاريخ: <strong>${date}</strong></div>
         </div>
-        <div class="branch-selector-wrap">
+        <div class="branch-selector-wrap" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button class="btn gold" onclick="manualSyncLocalPhotos()" title="رفع أي صور تم التقاطها بهذا الجهاز سابقاً إلى السحابة لتظهر على اللابتوب" style="font-size:12px;padding:6px 12px;">
+            ☁️ رفع صور هذا الجهاز للسحابة
+          </button>
           <select onchange="onOpeningBranchChange(this.value)">
             ${branchOptionsHtml(branch)}
           </select>
