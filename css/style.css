@@ -2378,3 +2378,163 @@ table.order-table td.total-cell{ font-weight:900; background:#FFF4D6; }
   font-weight: 800;
   cursor: pointer;
 }
+
+
+/* --- كرت جرد المتبقي الموحد بصف واحد فائق الضغط --- */
+.remaining-card-mobile {
+  background: var(--card);
+  border: 1.5px solid var(--black);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.85);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rem-single-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rem-info-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 140px;
+}
+
+.rem-inputs-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.rem-inline-input-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #F8F9FA;
+  padding: 2px 6px;
+  border-radius: 8px;
+  border: 1.5px solid #CFD8DC;
+}
+
+.rem-inline-input-group.protein {
+  border-color: #FFE082;
+  background: #FFFDF5;
+}
+
+.rem-inline-input-group.sauce {
+  border-color: #D1C4E9;
+  background: #F8F5FC;
+}
+
+.rem-field-label {
+  font-size: 11px;
+  font-weight: 900;
+  color: #333333;
+  white-space: nowrap;
+}
+
+.rem-mini-input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.rem-mini-input {
+  width: 72px;
+  height: 36px;
+  font-size: 15px;
+  font-weight: 900;
+  text-align: center;
+  border: 1.5px solid var(--black);
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: var(--black);
+  padding: 0 24px 0 4px;
+}
+
+.rem-mini-input:focus {
+  outline: none;
+  border-color: var(--yellow-dark);
+  box-shadow: 0 0 0 2px rgba(247, 220, 78, 0.4);
+}
+
+.rem-mini-input.border-green {
+  border-color: var(--green);
+  background: #F6FFF9;
+}
+
+.rem-mini-unit {
+  position: absolute;
+  left: 5px;
+  font-size: 9.5px;
+  font-weight: 800;
+  color: var(--gray);
+  pointer-events: none;
+}
+
+.rem-mini-zero-btn {
+  height: 36px;
+  padding: 0 8px;
+  background: #ECEFF1;
+  border: 1.5px solid var(--black);
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 900;
+  color: #455A64;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.rem-mini-zero-btn:active {
+  transform: scale(0.94);
+  background: #CFD8DC;
+}
+
+.rem-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rem-mini-note-btn {
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid var(--black);
+  background: #FFFFFF;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s;
+}
+
+.rem-mini-note-btn.has-notes {
+  background: #FFF9C4;
+  border-color: #FBC02D;
+}
+
+.rem-note-drawer {
+  transition: all 0.2s;
+  padding-top: 2px;
+}
+
+.rem-note-drawer.hidden {
+  display: none;
+}
+
+.rem-note-drawer.expanded {
+  display: block;
+}
