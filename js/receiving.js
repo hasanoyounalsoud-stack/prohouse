@@ -607,6 +607,7 @@ function confirmAddReceivingItem(category) {
     name: name,
     unit: unit,
     category: category,
+    branches: currentReceivingBranch,
     isCustom: true
   };
 
@@ -618,6 +619,20 @@ function confirmAddReceivingItem(category) {
     status: computeReceivingItemStatus(qty, 0)
   };
   currentReceivingOrdered[newCustomId] = 0;
+
+  // تسجيل الصنف فوراً في قاعدة الأصناف المشتركة لتتعرف عليه شاشات المتبقي وطلبية الغد
+  try {
+    Items.save({
+      id: newCustomId,
+      name: name,
+      unit: unit,
+      category: category,
+      branches: currentReceivingBranch,
+      isCustom: true
+    });
+  } catch (err) {
+    console.warn("تعذر حفظ الصنف المشترك في Items:", err);
+  }
 
   closeAddReceivingItemModal();
   showToast(`✅ تم إضافة صنف "${name}" إلى قسم ${category}`);

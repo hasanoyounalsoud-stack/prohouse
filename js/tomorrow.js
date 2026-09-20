@@ -10,6 +10,64 @@ let currentTomorrowTodayReceived = {}; // itemId -> receivedQty
 let currentTomorrowTodayRemaining = {}; // itemId -> remainingQty
 let currentTomorrowTodaySales = {}; // category -> soldQty
 let tomorrowActiveFilter = "all"; // 'all', 'unfilled', 'protein', 'sauce'
+let currentTomorrowExtraItems = [];
+let currentTomorrowRemovedIds = new Set();
+
+function getAllTomorrowActiveItems() {
+  const branch = currentTomorrowBranch || Branch.get();
+  const itemsMap = new Map();
+
+  // 1. الأصناف الأساسية من Items.current
+  (Items.current || []).forEach(it => {
+    const branches = itemBranches(it);
+    if (branches.length && branch && !branches.includes(branch)) return;
+    itemsMap.set(it.id, { ...it });
+  });
+
+  // 2. الأصناف المستلمة اليوم من الاستلام (تشمل أي صنف إضافي أضافه الشيف أو الفرع)
+  Object.keys(currentTomorrowTodayReceived).forEach(id => {
+    if (!itemsMap.has(id)) {
+      const itemDef = Items.byId(id);
+      itemsMap.set(id, {
+        id: id,
+        name: itemDef ? itemDef.name : id,
+        unit: itemDef ? itemDef.unit : "جرام",
+        category: itemDef ? itemDef.category : "عام",
+        isCustom: true,
+        branches: branch
+      });
+    }
+  });
+
+  // 3. الأصناف المتبقية الليلة
+  Object.keys(currentTomorrowTodayRemaining).forEach(id => {
+    if (!itemsMap.has(id)) {
+      const itemDef = Items.byId(id);
+      itemsMap.set(id, {
+        id: id,
+        name: itemDef ? itemDef.name : id,
+        unit: itemDef ? itemDef.unit : "جرام",
+        category: itemDef ? itemDef.category : "عام",
+        isCustom: true,
+        branches: branch
+      });
+    }
+  });
+
+  // 4. الأصناف الإضافية الخاصة بطلبية الغد
+  currentTomorrowExtraItems.forEach(it => {
+    if (!itemsMap.has(it.id)) itemsMap.set(it.id, { ...it });
+  });
+
+  // 5. استبعاد الأصناف المحذوفة
+  const result = [];
+  itemsMap.forEach((item, id) => {
+    if (currentTomorrowRemovedIds.has(id)) return;
+    result.push(item);
+  });
+
+  return result;
+}
 
 function isTomorrowItemFilled(id) {
   const e = currentTomorrowOrder[id];
@@ -57,12 +115,13 @@ function renderTomorrowView() {
   const ro = Auth.isViewOnlyTomorrow() ? "disabled" : "";
 
   // تجميع الإحصائيات
-  const totalItems = Items.current.length;
-  const filledItems = Items.current.filter(it => isTomorrowItemFilled(it.id)).length;
+  const allActiveItems = getAllTomorrowActiveItems();
+  const totalItems = allActiveItems.length;
+  const filledItems = allActiveItems.filter(it => isTomorrowItemFilled(it.id)).length;
   let totalRequestedWeight = 0;
   let totalEstimatedMeals = 0;
 
-  Items.current.forEach(it => {
+  allActiveItems.forEach(it => {
     const ord = currentTomorrowOrder[it.id];
     if (ord && ord.qty) {
       const q = Number(ord.qty);
@@ -137,12 +196,12 @@ function renderTomorrowView() {
   `;
   view.appendChild(headerCard);
 
-  if (!Items.current.length) {
+  if (!allActiveItems.length) {
     view.insertAdjacentHTML("beforeend", '<div class="empty-state">لا توجد أصناف مسجلة.</div>');
     return;
   }
 
-  const sortedItems = Items.current.slice().sort((a, b) => categoryRank(a.category) - categoryRank(b.category) || Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+  const sortedItems = allActiveItems.slice().sort((a, b) => categoryRank(a.category) - categoryRank(b.category) || Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
   const groups = [];
   sortedItems.forEach(item => {
     const last = groups[groups.length - 1];
@@ -214,8 +273,12 @@ function renderTomorrowView() {
           <div class="rec-item-title-wrap">
             <span class="rec-item-name">${item.name}</span>
             <span class="rec-item-unit">(${item.unit || "جرام"})</span>
+            ${item.isCustom ? '<span class="badge ok rec-custom-badge">إضافي</span>' : ''}
           </div>
-          ${isFilled ? '<span class="badge ok" style="font-size:11px;">✅ تم التحديد</span>' : '<span class="badge neutral" style="font-size:11px;">لم يحدد</span>'}
+          <div style="display:flex;align-items:center;gap:6px;">
+            ${isFilled ? '<span class="badge ok" style="font-size:11px;">✅ تم التحديد</span>' : '<span class="badge neutral" style="font-size:11px;">لم يحدد</span>'}
+            <button type="button" class="rec-btn-remove" ${ro} onclick="onRemoveTomorrowItem('${item.id}', '${String(item.name).replace(/'/g, "\\'")}')" title="استبعاد الصنف من طلبية الغد">✕</button>
+          </div>
         </div>
 
         <!-- مصفوفة الوضع التشغيلي اليومي -->
@@ -287,6 +350,15 @@ function renderTomorrowView() {
       inner.appendChild(card);
     });
 
+    if (!Auth.isViewOnlyTomorrow()) {
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "rec-add-item-btn";
+      addBtn.textContent = `➕ إضافة صنف في قسم (${group.category})`;
+      addBtn.onclick = () => openAddTomorrowItemModal(group.category);
+      inner.appendChild(addBtn);
+    }
+
     view.appendChild(section);
   });
 
@@ -345,7 +417,8 @@ function onQuickTomorrowIncrement(itemId, delta) {
 function applyAllAiRecommendations() {
   if (Auth.isViewOnlyTomorrow()) return;
   let appliedCount = 0;
-  Items.current.forEach(item => {
+  const allActiveItems = getAllTomorrowActiveItems();
+  allActiveItems.forEach(item => {
     let targetVal = null;
     const rec = currentTomorrowRecommendations[item.id];
     if (rec && rec.qty) {
@@ -379,7 +452,8 @@ function exportTomorrowOrderWhatsApp() {
   const branchName = currentTomorrowBranch || Branch.get() || "الفرع الرئيسي";
   const empName = (Auth.getEmployee() || {}).name || "المدير";
 
-  const orderedItems = Items.current
+  const allActiveItems = getAllTomorrowActiveItems();
+  const orderedItems = allActiveItems
     .filter(it => currentTomorrowOrder[it.id] && currentTomorrowOrder[it.id].qty !== "" && Number(currentTomorrowOrder[it.id].qty) > 0)
     .map(it => ({
       name: it.name,
@@ -517,7 +591,18 @@ async function loadTomorrowOrder(dateStr) {
 function applyTomorrowData(list) {
   if (!list || !list.length) return;
   const map = {};
-  list.forEach(it => { map[it.itemId] = { qty: it.qty, notes: it.notes }; });
+  list.forEach(it => { 
+    map[it.itemId] = { qty: it.qty, notes: it.notes }; 
+    if (!Items.byId(it.itemId) && !currentTomorrowExtraItems.some(x => x.id === it.itemId)) {
+      currentTomorrowExtraItems.push({
+        id: it.itemId,
+        name: it.itemName || it.name || it.itemId,
+        unit: it.unit || "جرام",
+        category: it.category || "عام",
+        isCustom: true
+      });
+    }
+  });
   currentTomorrowOrder = map;
 }
 
@@ -527,11 +612,27 @@ function saveTomorrowNow(showStatus) {
   const employeeName = (Auth.getEmployee() || {}).name || "";
   const branch = currentTomorrowBranch || "";
 
-  const items = Items.current
+  const allActiveItems = getAllTomorrowActiveItems();
+  const items = allActiveItems
     .filter(it => currentTomorrowOrder[it.id] && currentTomorrowOrder[it.id].qty !== "")
-    .map(it => ({ itemId: it.id, itemName: it.name, unit: it.unit, qty: currentTomorrowOrder[it.id].qty, notes: currentTomorrowOrder[it.id].notes || "" }));
+    .map(it => ({ 
+      itemId: it.id, 
+      itemName: it.name, 
+      unit: it.unit || "جرام", 
+      category: it.category || "عام",
+      isCustom: !!it.isCustom,
+      qty: currentTomorrowOrder[it.id].qty, 
+      notes: currentTomorrowOrder[it.id].notes || "" 
+    }));
 
-  const payload = { date: currentTomorrowDate, branch, employeeName, items, notify: !!showStatus };
+  const payload = { 
+    date: currentTomorrowDate, 
+    branch, 
+    employeeName, 
+    items, 
+    removedItemIds: Array.from(currentTomorrowRemovedIds),
+    notify: !!showStatus 
+  };
   Sync.enqueue("saveTomorrowOrder:" + currentTomorrowDate + ":" + branch, "saveTomorrowOrder", payload);
   Sync.cacheSet("tomorrow:" + currentTomorrowDate + ":" + branch, items);
 
@@ -571,4 +672,129 @@ function initTomorrowTab() {
   }
 
   loadTomorrowOrder(currentTomorrowDate);
+}
+
+
+// ---- وظائف إزالة وإضافة الأصناف في طلبية الغد ----
+
+function onRemoveTomorrowItem(itemId, itemName) {
+  if (Auth.isViewOnlyTomorrow()) return;
+  const confirmed = confirm(`هل أنت متأكد من استبعاد الصنف "${itemName || ''}" من طلبية الغد؟`);
+  if (!confirmed) return;
+
+  currentTomorrowRemovedIds.add(itemId);
+  currentTomorrowExtraItems = currentTomorrowExtraItems.filter(it => it.id !== itemId);
+  delete currentTomorrowOrder[itemId];
+
+  showToast(`🗑️ تم استبعاد الصنف من طلبية الغد`);
+  renderTomorrowView();
+  saveTomorrowNow(false);
+}
+
+function openAddTomorrowItemModal(category) {
+  if (Auth.isViewOnlyTomorrow()) return;
+  const existingModal = document.getElementById("customTomorrowModal");
+  if (existingModal) existingModal.remove();
+
+  const modalHtml = `
+    <div class="custom-rec-modal-backdrop" id="customTomorrowModal" onclick="if(event.target===this) closeAddTomorrowItemModal()">
+      <div class="custom-rec-modal-box">
+        <div class="custom-rec-modal-header">
+          <h3>➕ إضافة صنف لطلبية قسم (${category})</h3>
+          <button type="button" class="custom-rec-modal-close" onclick="closeAddTomorrowItemModal()">✕</button>
+        </div>
+        <div class="custom-rec-modal-body">
+          <div class="custom-rec-field-group">
+            <label>اسم الصنف المطلوب من المطبخ *</label>
+            <input type="text" id="customTomItemName" placeholder="مثال: صوص باربكيو مدخن، خبز بريوش إضافي..." autofocus>
+          </div>
+          <div class="custom-rec-field-group">
+            <label>وحدة القياس</label>
+            <select id="customTomItemUnit">
+              <option value="جرام" selected>جرام (جم)</option>
+              <option value="كجم">كيلو جرام (كجم)</option>
+              <option value="حبة">حبة</option>
+              <option value="علبة">علبة</option>
+              <option value="لتر">لتر</option>
+            </select>
+          </div>
+          <div class="custom-rec-field-group">
+            <label>الكمية المطلوبة للغد *</label>
+            <input type="number" step="any" min="0" inputmode="decimal" id="customTomItemQty" placeholder="0">
+          </div>
+          <div class="custom-rec-field-group">
+            <label>ملاحظة للمطبخ المركزي (اختياري)</label>
+            <input type="text" id="customTomItemNotes" placeholder="مثال: توصيل مع الدفعة الأولى...">
+          </div>
+          <div class="custom-rec-modal-actions">
+            <button type="button" class="btn-save" onclick="confirmAddTomorrowItem('${String(category).replace(/'/g, "\\'")}')">✅ إضافة للطلبية</button>
+            <button type="button" class="btn-cancel" onclick="closeAddTomorrowItemModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+  setTimeout(() => {
+    const input = document.getElementById("customTomItemName");
+    if (input) input.focus();
+  }, 100);
+}
+
+function closeAddTomorrowItemModal() {
+  const modal = document.getElementById("customTomorrowModal");
+  if (modal) modal.remove();
+}
+
+function confirmAddTomorrowItem(category) {
+  const nameInput = document.getElementById("customTomItemName");
+  const unitInput = document.getElementById("customTomItemUnit");
+  const qtyInput = document.getElementById("customTomItemQty");
+  const notesInput = document.getElementById("customTomItemNotes");
+
+  const name = (nameInput?.value || "").trim();
+  const unit = unitInput?.value || "جرام";
+  const qty = (qtyInput?.value || "").trim();
+  const notes = (notesInput?.value || "").trim();
+
+  if (!name) {
+    alert("يرجى كتابة اسم الصنف أولاً!");
+    if (nameInput) nameInput.focus();
+    return;
+  }
+
+  const newCustomId = "custom_tom_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+  const newItem = {
+    id: newCustomId,
+    name: name,
+    unit: unit,
+    category: category,
+    branches: currentTomorrowBranch || Branch.get(),
+    isCustom: true
+  };
+
+  currentTomorrowExtraItems.push(newItem);
+  currentTomorrowOrder[newCustomId] = {
+    qty: qty !== "" ? String(qty) : "",
+    notes: notes || "صنف إضافي لطلبية الغد"
+  };
+
+  try {
+    Items.save({
+      id: newCustomId,
+      name: name,
+      unit: unit,
+      category: category,
+      branches: currentTomorrowBranch || Branch.get(),
+      isCustom: true
+    });
+  } catch (err) {
+    console.warn("تعذر حفظ الصنف المشترك:", err);
+  }
+
+  closeAddTomorrowItemModal();
+  showToast(`✅ تم إضافة صنف "${name}" إلى طلبية قسم ${category}`);
+  renderTomorrowView();
+  saveTomorrowNow(false);
 }

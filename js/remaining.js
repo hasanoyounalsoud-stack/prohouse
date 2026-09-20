@@ -7,6 +7,57 @@ let currentRemainingMeta = { isClosed: false, closedBy: "", closedAt: "" };
 let isRemainingSaving = false;
 let remainingActiveFilter = "all"; // 'all', 'uncounted', 'protein', 'sauce', 'variance'
 let remainingCollapsed = {};
+let currentRemainingExtraItems = [];
+let currentRemainingRemovedIds = new Set();
+let cachedReceivingDataForRemaining = null;
+let cachedSalesDataForRemaining = null;
+
+function getAllRemainingActiveItems(receivingData) {
+  const branch = currentRemainingBranch;
+  const itemsMap = new Map();
+
+  // 1. الأصناف الأساسية من Items.current التابعة لهذا الفرع
+  (Items.current || []).forEach(it => {
+    const branches = itemBranches(it);
+    if (branches.length && branch && !branches.includes(branch)) return;
+    itemsMap.set(it.id, { ...it });
+  });
+
+  // 2. دمج الأصناف المستلمة اليوم من شاشة الاستلام (بما فيها أي صنف إضافي أضافه الشيف أو الفرع)
+  const recData = receivingData || cachedReceivingDataForRemaining;
+  if (recData && Array.isArray(recData.items)) {
+    recData.items.forEach(recIt => {
+      const id = recIt.itemId || recIt.id;
+      if (!id) return;
+      if (!itemsMap.has(id)) {
+        itemsMap.set(id, {
+          id: id,
+          name: recIt.itemName || recIt.name || id,
+          unit: recIt.unit || "جرام",
+          category: recIt.category || "عام",
+          isCustom: true,
+          branches: branch
+        });
+      } else if (recIt.isCustom) {
+        itemsMap.get(id).isCustom = true;
+      }
+    });
+  }
+
+  // 3. الأصناف المضافة يدوياً في شاشة جرد المتبقي
+  currentRemainingExtraItems.forEach(it => {
+    if (!itemsMap.has(it.id)) itemsMap.set(it.id, { ...it });
+  });
+
+  // 4. استبعاد الأصناف المحذوفة
+  const result = [];
+  itemsMap.forEach((item, id) => {
+    if (currentRemainingRemovedIds.has(id)) return;
+    result.push(item);
+  });
+
+  return result;
+}
 
 function initRemainingModule() {
   currentRemainingBranch = Branch.get() || allowedBranchList()[0] || "";
@@ -29,11 +80,19 @@ async function loadRemainingData(date, branch) {
       Sync.get("getRemainingReport", { date: currentRemainingDate, branch: currentRemainingBranch }, "remaining:" + currentRemainingDate + ":" + currentRemainingBranch).catch(() => null)
     ]);
 
+    cachedReceivingDataForRemaining = receivingData;
+    cachedSalesDataForRemaining = salesData;
+
     currentRemainingData = {};
     currentRemainingMeta = { isClosed: false, closedBy: "", closedAt: "" };
+    currentRemainingExtraItems = [];
+    currentRemainingRemovedIds = new Set();
 
     if (remainingData) {
       if (remainingData.meta) currentRemainingMeta = remainingData.meta;
+      if (Array.isArray(remainingData.removedItemIds)) {
+        currentRemainingRemovedIds = new Set(remainingData.removedItemIds);
+      }
       (remainingData.items || []).forEach(it => {
         currentRemainingData[it.itemId] = {
           remaining: it.remaining !== undefined && it.remaining !== null ? String(it.remaining) : "",
@@ -41,6 +100,16 @@ async function loadRemainingData(date, branch) {
           remainingSauce: it.remainingSauce !== undefined && it.remainingSauce !== null ? String(it.remainingSauce) : "",
           notes: it.notes || ""
         };
+        // إذا كان صنف إضافي محفوظ سابقاً غير موجود في الأصناف الأساسية
+        if (!Items.byId(it.itemId) && !currentRemainingExtraItems.some(x => x.id === it.itemId)) {
+          currentRemainingExtraItems.push({
+            id: it.itemId,
+            name: it.itemName || it.name || it.itemId,
+            unit: it.unit || "جرام",
+            category: it.category || "عام",
+            isCustom: true
+          });
+        }
       });
     }
 
@@ -150,7 +219,10 @@ function renderRemainingView(receivingData, salesData) {
   const view = document.getElementById("remainingView");
   if (!view) return;
 
-  const items = Items.current;
+  cachedReceivingDataForRemaining = receivingData || cachedReceivingDataForRemaining;
+  cachedSalesDataForRemaining = salesData || cachedSalesDataForRemaining;
+
+  const items = getAllRemainingActiveItems(cachedReceivingDataForRemaining);
   const isClosed = !!currentRemainingMeta.isClosed;
 
   const receivingMap = {};
@@ -333,10 +405,14 @@ function renderRemainingView(receivingData, salesData) {
             <div class="rem-item-title-wrap">
               <span class="rem-item-name">${it.name}</span>
               <span class="rem-item-unit">(${it.unit || "جرام"})</span>
+              ${it.isCustom ? '<span class="badge ok rec-custom-badge">إضافي</span>' : ''}
             </div>
-            ${recQty > 0 ? `
-              <span class="badge neutral" style="font-size:11px;">📦 استلام الصباح: ${Math.round(recQty)} جم</span>
-            ` : '<span class="badge neutral" style="font-size:11px;">— لم يُستلم اليوم</span>'}
+            <div style="display:flex;align-items:center;gap:6px;">
+              ${recQty > 0 ? `
+                <span class="badge neutral" style="font-size:11px;">📦 استلام الصباح: ${Math.round(recQty)} جم</span>
+              ` : '<span class="badge neutral" style="font-size:11px;">— لم يُستلم اليوم</span>'}
+              <button type="button" class="rec-btn-remove" onclick="onRemoveRemainingItem('${it.id}', '${String(it.name).replace(/'/g, "\\'")}')" title="استبعاد من جرد اليوم">✕</button>
+            </div>
           </div>
 
           <div class="rem-dual-inputs-grid">
@@ -463,6 +539,9 @@ function renderRemainingView(receivingData, salesData) {
         <div class="category-body">
           <div>
             ${cardsHtml}
+            <button type="button" class="rec-add-item-btn" onclick="openAddRemainingItemModal('${String(cat).replace(/'/g, "\\'")}')">
+              ➕ إضافة صنف في قسم (${cat})
+            </button>
           </div>
         </div>
       </div>
@@ -574,16 +653,16 @@ let saveRemLocalTimer = null;
 function saveRemainingLocalDebounced() {
   clearTimeout(saveRemLocalTimer);
   saveRemLocalTimer = setTimeout(() => {
+    const allItems = getAllRemainingActiveItems(cachedReceivingDataForRemaining);
     const itemsPayload = [];
-    Items.current.forEach(it => {
-      const branches = itemBranches(it);
-      if (branches.length && !branches.includes(currentRemainingBranch)) return;
-
+    allItems.forEach(it => {
       const data = currentRemainingData[it.id] || { remaining: "", remainingWeight: "", remainingSauce: "", notes: "" };
       itemsPayload.push({
         itemId: it.id,
         itemName: it.name,
         unit: it.unit || "جرام",
+        category: it.category || "عام",
+        isCustom: !!it.isCustom,
         remaining: data.remainingWeight || data.remaining || "",
         remainingWeight: data.remainingWeight || "",
         remainingSauce: data.remainingSauce || "",
@@ -595,7 +674,8 @@ function saveRemainingLocalDebounced() {
       date: currentRemainingDate,
       branch: currentRemainingBranch,
       meta: currentRemainingMeta,
-      items: itemsPayload
+      items: itemsPayload,
+      removedItemIds: Array.from(currentRemainingRemovedIds)
     });
   }, 400);
 }
@@ -615,16 +695,16 @@ async function saveRemainingReportData() {
   const saveBtn = document.getElementById("remainingSaveBtn");
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "جاري حفظ التقرير…"; }
 
+  const allItems = getAllRemainingActiveItems(cachedReceivingDataForRemaining);
   const itemsPayload = [];
-  Items.current.forEach(it => {
-    const branches = itemBranches(it);
-    if (branches.length && !branches.includes(currentRemainingBranch)) return;
-
+  allItems.forEach(it => {
     const data = currentRemainingData[it.id] || { remaining: "", remainingWeight: "", remainingSauce: "", notes: "" };
     itemsPayload.push({
       itemId: it.id,
       itemName: it.name,
       unit: it.unit || "جرام",
+      category: it.category || "عام",
+      isCustom: !!it.isCustom,
       remaining: data.remainingWeight || data.remaining || "",
       remainingWeight: data.remainingWeight || "",
       remainingSauce: data.remainingSauce || "",
@@ -639,6 +719,7 @@ async function saveRemainingReportData() {
     employeeName: emp ? emp.name : "",
     meta: currentRemainingMeta,
     items: itemsPayload,
+    removedItemIds: Array.from(currentRemainingRemovedIds),
     savedAt: new Date().toISOString()
   };
 
@@ -674,4 +755,125 @@ async function closeOperationalDay() {
   await saveRemainingReportData();
   showToast("🔒 تم إغلاق اليوم التشغيلي بنجاح!");
   loadRemainingData(currentRemainingDate, currentRemainingBranch);
+}
+
+
+// ---- وظائف إزالة وإضافة الأصناف في جرد المتبقي ----
+
+function onRemoveRemainingItem(itemId, itemName) {
+  const confirmed = confirm(`هل أنت متأكد من استبعاد الصنف "${itemName || ''}" من جرد المتبقي اليوم؟`);
+  if (!confirmed) return;
+
+  currentRemainingRemovedIds.add(itemId);
+  currentRemainingExtraItems = currentRemainingExtraItems.filter(it => it.id !== itemId);
+  delete currentRemainingData[itemId];
+
+  showToast(`🗑️ تم استبعاد الصنف من جرد المتبقي`);
+  renderRemainingView(cachedReceivingDataForRemaining, cachedSalesDataForRemaining);
+  saveRemainingLocalDebounced();
+  updateSaveBarRemainingStatus();
+}
+
+function openAddRemainingItemModal(category) {
+  const existingModal = document.getElementById("customRemainingModal");
+  if (existingModal) existingModal.remove();
+
+  const modalHtml = `
+    <div class="custom-rec-modal-backdrop" id="customRemainingModal" onclick="if(event.target===this) closeAddRemainingItemModal()">
+      <div class="custom-rec-modal-box">
+        <div class="custom-rec-modal-header">
+          <h3>➕ إضافة صنف لجرد قسم (${category})</h3>
+          <button type="button" class="custom-rec-modal-close" onclick="closeAddRemainingItemModal()">✕</button>
+        </div>
+        <div class="custom-rec-modal-body">
+          <div class="custom-rec-field-group">
+            <label>اسم الصنف المراد جرده *</label>
+            <input type="text" id="customRemItemName" placeholder="مثال: دجاج متبل إضافي، صوص خاص..." autofocus>
+          </div>
+          <div class="custom-rec-field-group">
+            <label>وحدة القياس</label>
+            <select id="customRemItemUnit">
+              <option value="جرام" selected>جرام (جم)</option>
+              <option value="كجم">كيلو جرام (كجم)</option>
+              <option value="حبة">حبة</option>
+              <option value="علبة">علبة</option>
+              <option value="لتر">لتر</option>
+            </select>
+          </div>
+          <div class="custom-rec-field-group">
+            <label>الوزن أو الكمية المتبقية الليلة</label>
+            <input type="number" step="any" min="0" inputmode="decimal" id="customRemItemQty" placeholder="0">
+          </div>
+          <div class="custom-rec-modal-actions">
+            <button type="button" class="btn-save" onclick="confirmAddRemainingItem('${String(category).replace(/'/g, "\\'")}')">✅ إضافة للجرد</button>
+            <button type="button" class="btn-cancel" onclick="closeAddRemainingItemModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+  setTimeout(() => {
+    const input = document.getElementById("customRemItemName");
+    if (input) input.focus();
+  }, 100);
+}
+
+function closeAddRemainingItemModal() {
+  const modal = document.getElementById("customRemainingModal");
+  if (modal) modal.remove();
+}
+
+function confirmAddRemainingItem(category) {
+  const nameInput = document.getElementById("customRemItemName");
+  const unitInput = document.getElementById("customRemItemUnit");
+  const qtyInput = document.getElementById("customRemItemQty");
+
+  const name = (nameInput?.value || "").trim();
+  const unit = unitInput?.value || "جرام";
+  const qty = (qtyInput?.value || "").trim();
+
+  if (!name) {
+    alert("يرجى كتابة اسم الصنف أولاً!");
+    if (nameInput) nameInput.focus();
+    return;
+  }
+
+  const newCustomId = "custom_rem_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+  const newItem = {
+    id: newCustomId,
+    name: name,
+    unit: unit,
+    category: category,
+    branches: currentRemainingBranch,
+    isCustom: true
+  };
+
+  currentRemainingExtraItems.push(newItem);
+  currentRemainingData[newCustomId] = {
+    remaining: qty !== "" ? String(qty) : "",
+    remainingWeight: qty !== "" ? String(qty) : "",
+    remainingSauce: "",
+    notes: "صنف إضافي بجرد المتبقي"
+  };
+
+  try {
+    Items.save({
+      id: newCustomId,
+      name: name,
+      unit: unit,
+      category: category,
+      branches: currentRemainingBranch,
+      isCustom: true
+    });
+  } catch (err) {
+    console.warn("تعذر حفظ الصنف المشترك:", err);
+  }
+
+  closeAddRemainingItemModal();
+  showToast(`✅ تم إضافة صنف "${name}" إلى جرد قسم ${category}`);
+  renderRemainingView(cachedReceivingDataForRemaining, cachedSalesDataForRemaining);
+  saveRemainingLocalDebounced();
+  updateSaveBarRemainingStatus();
 }
