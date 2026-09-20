@@ -393,6 +393,8 @@ function renderRemainingView(receivingData, salesData) {
         }
       }
 
+      const notesExpanded = remainingNotesExpanded[it.id] || !!remData.notes;
+
       return `
         <div class="remaining-card-mobile" 
              data-item-id="${it.id}" 
@@ -401,102 +403,70 @@ function renderRemainingView(receivingData, salesData) {
              data-hassauce="${isSauce || isProtein}"
              data-hasvariance="${hasVariance}">
           
-          <div class="rem-card-header">
-            <div class="rem-item-title-wrap">
+          <!-- سطر الصنف الموحد والمختصر (اسم، استلام، وجبات، إدخال متبقي، صوص، وإجراءات) -->
+          <div class="rem-single-row">
+            <!-- معلومات الصنف -->
+            <div class="rem-info-group">
               <span class="rem-item-name">${it.name}</span>
-              <span class="rem-item-unit">(${it.unit || "جرام"})</span>
+              <span class="rem-item-unit">(${it.unit || "جم"})</span>
               ${it.isCustom ? '<span class="badge ok rec-custom-badge">إضافي</span>' : ''}
-            </div>
-            <div style="display:flex;align-items:center;gap:6px;">
-              ${recQty > 0 ? `
-                <span class="badge neutral" style="font-size:11px;">📦 استلام الصباح: ${Math.round(recQty)} جم</span>
-              ` : '<span class="badge neutral" style="font-size:11px;">— لم يُستلم اليوم</span>'}
-              <button type="button" class="rec-btn-remove" onclick="onRemoveRemainingItem('${it.id}', '${String(it.name).replace(/'/g, "\\'")}')" title="استبعاد من جرد اليوم">✕</button>
-            </div>
-          </div>
-
-          <div class="rem-dual-inputs-grid">
-            
-            <!-- 🍗 حقل الدجاج والبروتين المتبقي -->
-            <div class="rem-sub-box protein">
-              <div class="rem-sub-header protein">
-                <span>🍗 وزن الدجاج / البروتين المتبقي (جم)</span>
-                <span id="remmeals-${it.id}" class="rec-meal-calc" style="font-size:11px;">
+              <span class="rec-meta-chip rec-req-chip" title="المستلم صباحاً">📦 ${recQty > 0 ? Math.round(recQty) : '—'}</span>
+              ${isProtein ? `
+                <span id="remmeals-${it.id}" class="rec-meta-chip rec-meal-chip">
                   🍽 ${actualWeight > 0 ? mealsCount(actualWeight) + ' وجبة' : '0 وجبة'}
                 </span>
-              </div>
-              
-              <div class="rec-input-action-row">
-                <div class="rec-input-wrapper">
+              ` : ''}
+              ${itemVarianceText && !Auth.isBranchStaff() ? `
+                <span class="rec-meta-chip diff-red" title="انحراف">⚠️ ${itemVarianceText}</span>
+              ` : ''}
+            </div>
+
+            <!-- خانات الإدخال المدمجة بصف واحد -->
+            <div class="rem-inputs-group">
+              <!-- خانة وزن المتبقي -->
+              <div class="rem-inline-input-group protein">
+                <span class="rem-field-label">🍗 المتبقي:</span>
+                <div class="rem-mini-input-wrap">
                   <input type="number" step="any" min="0" inputmode="decimal"
                          id="remweight-${it.id}"
                          value="${remData.remainingWeight || remData.remaining || ''}"
                          placeholder="0"
                          ${isClosed ? 'disabled' : ''}
                          oninput="onRemainingWeightChange('${it.id}', this.value)"
-                         class="rec-main-input ${actualWeight > 0 ? 'border-green' : ''}">
-                  <span class="rec-input-unit-label">جم</span>
+                         class="rem-mini-input ${actualWeight > 0 ? 'border-green' : ''}">
+                  <span class="rem-mini-unit">${it.unit || "جم"}</span>
                 </div>
-                <div class="rec-inline-btns">
-                  <button type="button" class="rec-btn-quick zero" ${isClosed ? 'disabled' : ''} onclick="onQuickRemWeightZero('${it.id}')">
-                    نفد (0)
-                  </button>
-                </div>
+                <button type="button" class="rem-mini-zero-btn" ${isClosed ? 'disabled' : ''} onclick="onQuickRemWeightZero('${it.id}')" title="نفد (0)">0</button>
               </div>
 
-              <div class="rem-stepper-chips-row">
-                <button type="button" class="rem-step-chip" ${isClosed ? 'disabled' : ''} onclick="onQuickRemWeightIncrement('${it.id}', 100)">+100</button>
-                <button type="button" class="rem-step-chip" ${isClosed ? 'disabled' : ''} onclick="onQuickRemWeightIncrement('${it.id}', 500)">+500</button>
-                <button type="button" class="rem-step-chip" ${isClosed ? 'disabled' : ''} onclick="onQuickRemWeightIncrement('${it.id}', 1000)">+1 كجم</button>
-                <button type="button" class="rem-step-chip" ${isClosed ? 'disabled' : ''} onclick="onQuickRemWeightIncrement('${it.id}', 2000)">+2 كجم</button>
-                <button type="button" class="rem-step-chip clear" ${isClosed ? 'disabled' : ''} onclick="onQuickRemWeightClear('${it.id}')">✕ مسح</button>
+              <!-- خانة الصوص (للبروتين أو الصوصات) -->
+              ${(isSauce || isProtein) ? `
+                <div class="rem-inline-input-group sauce">
+                  <span class="rem-field-label">🥣 صوص:</span>
+                  <div class="rem-mini-input-wrap">
+                    <input type="number" step="any" min="0" inputmode="decimal"
+                           id="remsauce-${it.id}"
+                           value="${remData.remainingSauce || ''}"
+                           placeholder="0"
+                           ${isClosed ? 'disabled' : ''}
+                           oninput="onRemainingSauceChange('${it.id}', this.value)"
+                           class="rem-mini-input ${actualSauce > 0 ? 'border-green' : ''}">
+                    <span class="rem-mini-unit">علبة</span>
+                  </div>
+                  <button type="button" class="rem-mini-zero-btn" ${isClosed ? 'disabled' : ''} onclick="onQuickRemSauceZero('${it.id}')" title="نفد (0)">0</button>
+                </div>
+              ` : ''}
+
+              <!-- الإجراءات (ملاحظة وحذف) -->
+              <div class="rem-inline-actions">
+                <button type="button" class="rem-mini-note-btn ${remData.notes ? 'has-notes' : ''}" onclick="toggleRemainingNote('${it.id}')" title="ملاحظة">📝</button>
+                <button type="button" class="rec-btn-remove" onclick="onRemoveRemainingItem('${it.id}', '${String(it.name).replace(/'/g, "\\'")}')" title="استبعاد الصنف">✕</button>
               </div>
             </div>
-
-            <!-- 🥣 حقل الصوص المتبقي -->
-            <div class="rem-sub-box sauce">
-              <div class="rem-sub-header sauce">
-                <span>🥣 الصوص المتبقي (عبوات أو جرام)</span>
-                <span class="badge neutral" style="font-size:10px;">صوص ${it.name}</span>
-              </div>
-
-              <div class="rec-input-action-row">
-                <div class="rec-input-wrapper">
-                  <input type="number" step="any" min="0" inputmode="decimal"
-                         id="remsauce-${it.id}"
-                         value="${remData.remainingSauce || ''}"
-                         placeholder="0"
-                         ${isClosed ? 'disabled' : ''}
-                         oninput="onRemainingSauceChange('${it.id}', this.value)"
-                         class="rec-main-input ${actualSauce > 0 ? 'border-green' : ''}">
-                  <span class="rec-input-unit-label">كمية</span>
-                </div>
-                <div class="rec-inline-btns">
-                  <button type="button" class="rec-btn-quick zero" ${isClosed ? 'disabled' : ''} onclick="onQuickRemSauceZero('${it.id}')">
-                    نفد (0)
-                  </button>
-                </div>
-              </div>
-
-              <div class="rem-stepper-chips-row">
-                <button type="button" class="rem-step-chip" ${isClosed ? 'disabled' : ''} onclick="onQuickRemSauceIncrement('${it.id}', 1)">+1</button>
-                <button type="button" class="rem-step-chip" ${isClosed ? 'disabled' : ''} onclick="onQuickRemSauceIncrement('${it.id}', 5)">+5</button>
-                <button type="button" class="rem-step-chip" ${isClosed ? 'disabled' : ''} onclick="onQuickRemSauceIncrement('${it.id}', 10)">+10</button>
-                <button type="button" class="rem-step-chip minus" ${isClosed ? 'disabled' : ''} onclick="onQuickRemSauceIncrement('${it.id}', -1)">-1</button>
-                <button type="button" class="rem-step-chip clear" ${isClosed ? 'disabled' : ''} onclick="onQuickRemSauceClear('${it.id}')">✕ مسح</button>
-              </div>
-            </div>
-
           </div>
 
-          ${itemVarianceText && !Auth.isBranchStaff() ? `
-            <div class="rem-variance-badge-bar">
-              <span class="text-red font-bold">${itemVarianceText}</span>
-              <span style="font-size:11px;color:var(--gray);">يرجى التأكد من الميزان أو إدراج ملاحظة</span>
-            </div>
-          ` : ''}
-
-          <div class="rec-notes-container expanded">
+          <!-- درج الملاحظات القابل للطي -->
+          <div class="rem-note-drawer ${notesExpanded ? 'expanded' : 'hidden'}" id="remnote-drawer-${it.id}">
             <input type="text" value="${remData.notes || ''}" 
                    placeholder="ملاحظات جرد هذا الصنف (تالف، هدر في التحضير، عينات...)"
                    id="remnote-${it.id}"
@@ -876,4 +846,18 @@ function confirmAddRemainingItem(category) {
   renderRemainingView(cachedReceivingDataForRemaining, cachedSalesDataForRemaining);
   saveRemainingLocalDebounced();
   updateSaveBarRemainingStatus();
+}
+
+let remainingNotesExpanded = {};
+function toggleRemainingNote(itemId) {
+  remainingNotesExpanded[itemId] = !remainingNotesExpanded[itemId];
+  const drawer = document.getElementById("remnote-drawer-" + itemId);
+  if (drawer) {
+    drawer.classList.toggle("hidden", !remainingNotesExpanded[itemId]);
+    drawer.classList.toggle("expanded", !!remainingNotesExpanded[itemId]);
+    if (remainingNotesExpanded[itemId]) {
+      const inp = document.getElementById("remnote-" + itemId);
+      if (inp) inp.focus();
+    }
+  }
 }
