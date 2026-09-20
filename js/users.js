@@ -5,7 +5,8 @@ const ROLE_LABELS = {
   admin: "مدير عام تشغيلي (Operations Admin)",
   manager: "مدير فرع (Branch Manager)",
   chef: "شيف مطبخ (Kitchen Chef)",
-  employee: "موظف فرع (Branch Staff)",
+  branch_staff: "موظف فرع (تشغيل وتسجيل بيانات)",
+  employee: "موظف فرع (تشغيل وتسجيل بيانات)",
   viewer: "مراقب وقارئ (Read-Only Viewer)"
 };
 
@@ -13,16 +14,35 @@ let usersListState = [];
 
 async function loadUsersData() {
   const data = await Sync.get("getEmployees", {}, "employees");
+  const ROSTER_NAMES = {
+    emp_1: "أ.يزيد",
+    emp_2: "حسن",
+    emp_3: "الشيف عصام",
+    emp_4: "أبو يونس",
+    emp_5: "العامودي",
+    emp_6: "محمد البلول",
+    emp_7: "غالب"
+  };
+
   if (data && Array.isArray(data) && data.length > 0) {
-    usersListState = data;
+    usersListState = data.map(u => {
+      const isBranchStaff = u.id === "emp_6" || u.id === "emp_7" || u.name === "محمد البلول" || u.name === "غالب";
+      return {
+        ...u,
+        name: ROSTER_NAMES[u.id] || u.name,
+        role: isBranchStaff ? "branch_staff" : u.role,
+        branches: isBranchStaff ? "عبداللطيف جميل" : u.branches
+      };
+    });
   } else {
-    // قائمة الموظفين الافتراضية
-    usersListState = typeof EMPLOYEES_FALLBACK !== "undefined" ? EMPLOYEES_FALLBACK : [
-      { pin: "1111", name: "صاحب المطعم (المالك)", role: "owner", branches: "" },
-      { pin: "2222", name: "الشيف الرئيسي", role: "chef", branches: "" },
-      { pin: "3333", name: "مدير فرع الروضة", role: "manager", branches: "الروضة" },
-      { pin: "4444", name: "موظف الشاطئ", role: "employee", branches: "الشاطئ" },
-      { pin: "5555", name: "موظف عبداللطيف جميل", role: "employee", branches: "عبداللطيف جميل" }
+    usersListState = [
+      { pin: "7284", name: "أ.يزيد", role: "owner", branches: "كل الفروع" },
+      { pin: "5931", name: "حسن", role: "owner", branches: "كل الفروع" },
+      { pin: "4062", name: "الشيف عصام", role: "chef", branches: "كل الفروع" },
+      { pin: "8317", name: "أبو يونس", role: "manager", branches: "الروضة" },
+      { pin: "2649", name: "العامودي", role: "manager", branches: "الشاطئ" },
+      { pin: "6503", name: "محمد البلول", role: "branch_staff", branches: "عبداللطيف جميل" },
+      { pin: "9174", name: "غالب", role: "branch_staff", branches: "عبداللطيف جميل" }
     ];
   }
 }

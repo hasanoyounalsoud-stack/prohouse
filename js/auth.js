@@ -124,7 +124,7 @@ const Auth = (() => {
             id: emp.id,
             name: finalName,
             role: finalRole,
-            branches: (emp.branches || "").split(",").map(s => s.trim()).filter(Boolean)
+            branches: isBranchUser ? ["عبداللطيف جميل"] : (emp.branches || "").split(",").map(s => s.trim()).filter(Boolean)
           };
           setSession(token, formatted);
           return true;
