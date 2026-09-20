@@ -295,31 +295,34 @@ async function run() {
       }
 
       if (!mappedRows.length) {
-        console.warn(`⚠️ تحذير: جدول مبيعات تابسنس المستخرج فارغ أو يحتوي على رسالة عدم وجود بيانات لفرع ${config.branch} في تاريخ ${iso}`);
-        throw new Error("لم يتم العثور على مبيعات في تابسنس لهذا اليوم — تأكد من التاريخ وتوفر المبيعات بالجدول");
-      }
-
-      // ---- 3) إرسال النتيجة لموقع برو هاوس ----
-      console.log(`🚀 جاري إرسال البيانات لموقع Pro House (فرع ${config.branch} - تاريخ ${iso})...`);
-      const res = await fetch(config.prohouseApiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          action: "importSalesByCategory",
-          integrationToken: config.integrationToken,
-          payload: { date: iso, branch: config.branch, rows: mappedRows }
-        })
-      });
-      const json = await res.json();
-      if (!json.ok) throw new Error("رفض السيرفر البيانات: " + json.error);
-
-      // نفس البيانات للنظام الجديد (Supabase) إذا كان مربوطاً
-      if (config.supabaseUrl && config.supabaseToken) {
+        console.warn(`⚠️ تحذير: لم يتم العثور على مبيعات في تابسنس لفرع ${config.branch} في تاريخ ${iso} (أو الجدول فارغ لهذا اليوم). سيتم تخطي الإرسال لهذا التاريخ والانتقال للتالي.`);
+      } else {
+        // ---- 3) إرسال النتيجة لموقع برو هاوس ----
+        console.log(`🚀 جاري إرسال البيانات لموقع Pro House (فرع ${config.branch} - تاريخ ${iso})...`);
         try {
-          await sendToSupabase("import_sales", iso, config.branch, mappedRows);
-          console.log("☁️ تم تحديث مبيعات التصنيفات على Supabase أيضاً.");
-        } catch (supaErr) {
-          console.warn("⚠ تعذر تحديث Supabase (مبيعات التصنيفات):", supaErr.message);
+          const res = await fetch(config.prohouseApiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({
+              action: "importSalesByCategory",
+              integrationToken: config.integrationToken,
+              payload: { date: iso, branch: config.branch, rows: mappedRows }
+            })
+          });
+          const json = await res.json();
+          if (!json.ok) console.warn("رفض السيرفر البيانات:", json.error);
+        } catch (fetchErr) {
+          console.warn("⚠ تعذر إرسال مبيعات التصنيفات إلى API:", fetchErr.message);
+        }
+
+        // نفس البيانات للنظام الجديد (Supabase) إذا كان مربوطاً
+        if (config.supabaseUrl && config.supabaseToken) {
+          try {
+            await sendToSupabase("import_sales", iso, config.branch, mappedRows);
+            console.log("☁️ تم تحديث مبيعات التصنيفات على Supabase أيضاً.");
+          } catch (supaErr) {
+            console.warn("⚠ تعذر تحديث Supabase (مبيعات التصنيفات):", supaErr.message);
+          }
         }
       }
 
@@ -327,18 +330,22 @@ async function run() {
       const juiceRows = pickJuiceRows(products, config.juiceCategories || DEFAULT_JUICE_CATEGORIES);
       if (juiceRows.length) {
         console.log(`🥤 جاري إرسال مبيعات ${juiceRows.length} عصير...`);
-        const juiceRes = await fetch(config.prohouseApiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({
-            action: "importJuiceSales",
-            integrationToken: config.integrationToken,
-            payload: { date: iso, branch: config.branch, rows: juiceRows }
-          })
-        });
-        const juiceJson = await juiceRes.json();
-        if (!juiceJson.ok) console.warn("⚠ فشل إرسال مبيعات العصيرات:", juiceJson.error);
-        else console.log("🥤 تم إرسال مبيعات العصيرات:", juiceRows);
+        try {
+          const juiceRes = await fetch(config.prohouseApiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({
+              action: "importJuiceSales",
+              integrationToken: config.integrationToken,
+              payload: { date: iso, branch: config.branch, rows: juiceRows }
+            })
+          });
+          const juiceJson = await juiceRes.json();
+          if (!juiceJson.ok) console.warn("⚠ فشل إرسال مبيعات العصيرات:", juiceJson.error);
+          else console.log("🥤 تم إرسال مبيعات العصيرات:", juiceRows);
+        } catch (jErr) {
+          console.warn("⚠ خطأ شبكة أثناء إرسال مبيعات العصيرات:", jErr.message);
+        }
 
         if (config.supabaseUrl && config.supabaseToken) {
           try {
@@ -352,18 +359,20 @@ async function run() {
         console.log("🥤 ما لقينا منتجات عصيرات بتقرير المنتجات — تأكد من juiceCategories بـ config.json");
       }
 
-      console.log(`🎉 تم سحب وإرسال بيانات ${iso} لفرع ${config.branch} بنجاح!`, mappedRows);
+      if (mappedRows.length || juiceRows.length) {
+        console.log(`🎉 تم سحب وإرسال بيانات ${iso} لفرع ${config.branch} بنجاح!`, mappedRows);
 
-      // ---- 5) إشعارات الواتساب السحابية من GitHub Actions ----
-      if ((config.whatsappPhone || config.adminPhone) && (config.whatsappApiKey || config.whatsappToken)) {
-        const targetPhone = config.whatsappPhone || config.adminPhone;
-        const key = config.whatsappApiKey || config.whatsappToken;
-        const waText = encodeURIComponent(`📊 *تحديث سحابي أوتوماتيكي — Pro House*\n🏢 الفرع: ${config.branch}\n📅 التاريخ: ${iso}\n\n🎉 تم سحب وإرسال أحدث بيانات تابسنس بنجاح لفرع ${config.branch}.`);
-        try {
-          await fetch(`https://api.callmebot.com/whatsapp.php?phone=${targetPhone}&text=${waText}&apikey=${key}`);
-          console.log("📲 تم إرسال إشعار الواتساب السحابي بنجاح!");
-        } catch (waErr) {
-          console.warn("⚠ تعذر إرسال إشعار الواتساب السحابي:", waErr.message);
+        // ---- 5) إشعارات الواتساب السحابية من GitHub Actions ----
+        if ((config.whatsappPhone || config.adminPhone) && (config.whatsappApiKey || config.whatsappToken)) {
+          const targetPhone = config.whatsappPhone || config.adminPhone;
+          const key = config.whatsappApiKey || config.whatsappToken;
+          const waText = encodeURIComponent(`📊 *تحديث سحابي أوتوماتيكي — Pro House*\n🏢 الفرع: ${config.branch}\n📅 التاريخ: ${iso}\n\n🎉 تم سحب وإرسال أحدث بيانات تابسنس بنجاح لفرع ${config.branch}.`);
+          try {
+            await fetch(`https://api.callmebot.com/whatsapp.php?phone=${targetPhone}&text=${waText}&apikey=${key}`);
+            console.log("📲 تم إرسال إشعار الواتساب السحابي بنجاح!");
+          } catch (waErr) {
+            console.warn("⚠ تعذر إرسال إشعار الواتساب السحابي:", waErr.message);
+          }
         }
       }
     }
