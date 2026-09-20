@@ -733,6 +733,24 @@ const SupaEngine = (() => {
     return photoObj;
   }
 
+  async function deleteInspectionPhoto(photoId, date, branch) {
+    if (!date || !branch) return [];
+    let existingPhotos = await getInspectionPhotos(date, branch);
+    existingPhotos = existingPhotos.filter(p => p.id !== photoId);
+
+    await query("day_meta", {
+      method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify({
+        date,
+        branch,
+        sales_report_link: JSON.stringify(existingPhotos),
+        updated_at: new Date().toISOString()
+      })
+    });
+    return existingPhotos;
+  }
+
   // --- قائمة الفحص والافتتاح اليومي (Daily Shift Checklist) ---
   async function getChecklist(date, branch) {
     try {
@@ -795,6 +813,7 @@ const SupaEngine = (() => {
     getDashboard,
     getInspectionPhotos,
     saveInspectionPhoto,
+    deleteInspectionPhoto,
     getChecklist,
     saveChecklist
   };

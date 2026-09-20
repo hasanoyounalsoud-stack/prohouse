@@ -66,7 +66,28 @@ async function savePhotoRecord(photoData) {
   photoData.timestamp = photoData.timestamp || new Date().toISOString();
   photoData.uploaded = photoData.uploaded || false;
 
-  if (db) {
+  // 1. حذف أي صورة قديمة لنفس نقطة الفحص والجلسة لتفادي التكرار عند إعادة التصوير
+  if (db && photoData.sessionId && photoData.checkpointId) {
+    try {
+      await new Promise((resolve) => {
+        const tx = db.transaction("photos", "readwrite");
+        const store = tx.objectStore("photos");
+        const req = store.getAll();
+        req.onsuccess = () => {
+          (req.result || []).forEach(p => {
+            if (p.sessionId === photoData.sessionId && p.checkpointId === photoData.checkpointId && p.id !== photoData.id) {
+              store.delete(p.id);
+            }
+          });
+          store.put(photoData);
+          resolve(photoData);
+        };
+        req.onerror = () => { store.put(photoData); resolve(photoData); };
+      });
+    } catch (e) {
+      savePhotoToLocalStorageFallback(photoData);
+    }
+  } else if (db) {
     try {
       await new Promise((resolve) => {
         const tx = db.transaction("photos", "readwrite");
@@ -82,7 +103,17 @@ async function savePhotoRecord(photoData) {
     savePhotoToLocalStorageFallback(photoData);
   }
 
-  // المزامنة السحابية الفورية مع سوبابيس لتظهر لجميع الأجهزة واللابتوب
+  // 2. تحديث LocalStorage مع إزالة القديم إن وجد
+  try {
+    let list = JSON.parse(localStorage.getItem("ph_local_photos") || "[]");
+    if (photoData.sessionId && photoData.checkpointId) {
+      list = list.filter(p => !(p.sessionId === photoData.sessionId && p.checkpointId === photoData.checkpointId));
+    }
+    list.push(photoData);
+    localStorage.setItem("ph_local_photos", JSON.stringify(list.slice(-50)));
+  } catch(e) {}
+
+  // 3. المزامنة السحابية الفورية مع سوبابيس لتظهر لجميع الأجهزة واللابتوب
   if (typeof SupaEngine !== "undefined" && SupaEngine.saveInspectionPhoto) {
     try {
       await SupaEngine.saveInspectionPhoto(photoData);
@@ -98,6 +129,56 @@ async function savePhotoRecord(photoData) {
   }
 
   return photoData;
+}
+
+async function deletePhotoRecord(photoId) {
+  if (!confirm("هل أنت متأكد من حذف هذه الصورة؟ يمكنك التقاط صورة جديدة بدلاً منها.")) return;
+
+  // 1. Delete from IndexedDB
+  const db = await openMediaDatabase();
+  if (db) {
+    try {
+      await new Promise((resolve) => {
+        const tx = db.transaction("photos", "readwrite");
+        const store = tx.objectStore("photos");
+        store.delete(photoId);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    } catch (e) {}
+  }
+
+  // 2. Delete from LocalStorage fallback
+  try {
+    let list = JSON.parse(localStorage.getItem("ph_local_photos") || "[]");
+    list = list.filter(p => p.id !== photoId);
+    localStorage.setItem("ph_local_photos", JSON.stringify(list));
+  } catch (e) {}
+
+  // 3. Delete from Supabase
+  if (typeof SupaEngine !== "undefined" && SupaEngine.deleteInspectionPhoto) {
+    const branch = (typeof Branch !== "undefined" ? Branch.get() : "") || (typeof allowedBranchList === "function" ? allowedBranchList()[0] : "");
+    const date = todayStr();
+    try {
+      await SupaEngine.deleteInspectionPhoto(photoId, date, branch);
+    } catch (err) {
+      console.warn("Supabase photo delete error:", err);
+    }
+  }
+
+  showToast("🗑️ تم حذف الصورة — يمكنك الآن التقاط صورة بديلة");
+
+  // إغلاق المعاينة المكبرة لو كانت مفتوحة
+  const overlay = document.getElementById("photoFullscreenOverlay");
+  if (overlay) overlay.classList.remove("active");
+
+  // إعادة رسم الشاشات المفتوحة فوراً
+  if (typeof renderOpeningView === "function" && document.getElementById("openingView") && !document.getElementById("openingView").classList.contains("hidden")) {
+    renderOpeningView();
+  }
+  if (typeof renderInspectionGalleryView === "function" && document.getElementById("inspectionView") && !document.getElementById("inspectionView").classList.contains("hidden")) {
+    renderInspectionGalleryView();
+  }
 }
 
 function savePhotoToLocalStorageFallback(photoData) {
@@ -401,13 +482,18 @@ async function renderInspectionGalleryView() {
           <div class="timeline-grid">
             ${photos.map(p => `
               <div class="timeline-card">
-                <div class="timeline-img-wrap" onclick="viewPhotoFullscreen('${p.id}')">
+                <div class="timeline-img-wrap" onclick="viewPhotoFullscreen('${p.id}')" title="اضغط لتكبير الصورة">
                   <img src="${p.dataUrl}" alt="${p.checkpointName}" />
                   <span class="timeline-time">${new Date(p.timestamp).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}</span>
                 </div>
-                <div class="timeline-info">
-                  <strong>${p.checkpointName}</strong>
-                  <div class="timeline-emp">👤 ${p.employeeName}</div>
+                <div class="timeline-info" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;">
+                  <div>
+                    <strong style="display:block;margin-bottom:3px;">${p.checkpointName}</strong>
+                    <div class="timeline-emp">👤 ${p.employeeName}</div>
+                  </div>
+                  <button class="btn danger" style="padding:5px 12px;font-size:12px;" onclick="deletePhotoRecord('${p.id}')" title="حذف هذه الصورة إذا تم تصويرها بالخطأ">
+                    🗑️ حذف
+                  </button>
                 </div>
               </div>
             `).join("")}
@@ -444,6 +530,11 @@ function viewPhotoFullscreen(photoId) {
         <div class="fullscreen-caption">
           <h3>${p.checkpointName}</h3>
           <div>الفرع: ${p.branch} | الموظف: ${p.employeeName} | الوقت: ${new Date(p.timestamp).toLocaleString("ar-SA")}</div>
+          <div style="margin-top:14px;display:flex;gap:10px;justify-content:center;">
+            <button class="btn danger" style="font-size:14px;padding:8px 20px;" onclick="deletePhotoRecord('${p.id}')">
+              🗑️ حذف الصورة (إذا تم تصويرها بالخطأ)
+            </button>
+          </div>
         </div>
         <button class="fullscreen-close" onclick="document.getElementById('photoFullscreenOverlay').classList.remove('active')">✕</button>
       </div>

@@ -224,15 +224,32 @@ async function renderOpeningView() {
             const hasPhoto = !!photo;
             return `
               <div class="checkpoint-item-box ${hasPhoto ? 'done' : ''}">
-                <div class="cp-icon">${cp.icon}</div>
-                <div class="cp-info">
-                  <strong>${cp.name}</strong>
-                  <span class="cp-status">${hasPhoto ? '✓ تم التوثيق بنجاح' : 'مطلوب التوثيق 📷'}</span>
-                  ${photo ? `<div class="cp-time">🕒 ${new Date(photo.timestamp).toLocaleTimeString("ar-SA", { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
+                <div class="cp-main-content" style="display:flex;align-items:center;gap:12px;width:100%;">
+                  ${hasPhoto ? `
+                    <div class="cp-thumb-preview" onclick="viewPhotoFullscreen('${photo.id}')" title="اضغط لتكبير ومعاينة الصورة" style="cursor:pointer;position:relative;flex-shrink:0;">
+                      <img src="${photo.dataUrl}" alt="${cp.name}" style="width:62px;height:62px;object-fit:cover;border-radius:10px;border:2px solid var(--accent);box-shadow:0 2px 6px rgba(0,0,0,0.15);" />
+                      <span style="position:absolute;bottom:-4px;right:-4px;background:var(--accent);color:#000;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;">🔍</span>
+                    </div>
+                  ` : `
+                    <div class="cp-icon">${cp.icon}</div>
+                  `}
+                  <div class="cp-info" style="flex:1;">
+                    <strong style="font-size:15px;">${cp.name}</strong>
+                    <span class="cp-status" style="display:block;margin-top:2px;">${hasPhoto ? '✓ تم التوثيق' : 'مطلوب التوثيق 📷'}</span>
+                    ${photo ? `<div class="cp-time" style="font-size:12px;color:var(--text-muted);margin-top:2px;">🕒 ${new Date(photo.timestamp).toLocaleTimeString("ar-SA", { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
+                  </div>
                 </div>
-                <button class="btn ${hasPhoto ? 'secondary' : 'primary'} snap-cp-btn" onclick="snapCheckpointPhoto('${sessionId}', '${cp.id}', '${cp.name}')">
-                  ${hasPhoto ? '📷 إعادة التصوير' : '📷 تصوير'}
-                </button>
+
+                <div class="cp-actions-bar" style="display:flex;gap:8px;margin-top:12px;width:100%;">
+                  <button class="btn ${hasPhoto ? 'secondary' : 'primary'} snap-cp-btn" style="flex:1;" onclick="snapCheckpointPhoto('${sessionId}', '${cp.id}', '${cp.name}')">
+                    ${hasPhoto ? '🔄 تغيير / إعادة تصوير' : '📷 تصوير'}
+                  </button>
+                  ${hasPhoto ? `
+                    <button class="btn danger" style="padding:0 14px;border-radius:8px;" onclick="deletePhotoRecord('${photo.id}')" title="حذف هذه الصورة إذا تم تصويرها بالخطأ">
+                      🗑️ حذف
+                    </button>
+                  ` : ''}
+                </div>
               </div>
             `;
           }).join("")}
