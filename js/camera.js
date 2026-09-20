@@ -349,9 +349,7 @@ function openCameraModal(checkpointObj, callback) {
         </div>
 
         <div class="camera-controls">
-          <input type="file" id="cameraFileInput" accept="image/*" style="display:none;" onchange="handleCameraFileSelect(this)" />
-          <button class="btn gold capture-btn" id="btnSnapPhoto" onclick="takePhotoSnap()">📷 التقاط الصورة</button>
-          <button class="btn secondary" id="btnChoosePhoto" onclick="document.getElementById('cameraFileInput').click()">📁 اختيار من الاستوديو</button>
+          <button class="btn gold capture-btn" id="btnSnapPhoto" onclick="takePhotoSnap()">📷 التقاط الصورة المباشرة</button>
           <button class="btn primary hidden" id="btnConfirmPhoto" onclick="confirmPhotoSnap()">✓ اعتماد الصورة</button>
           <button class="btn secondary hidden" id="btnRetakePhoto" onclick="retakePhotoSnap()">🔄 إعادة التصوير</button>
         </div>
@@ -400,53 +398,6 @@ function closeCameraModal() {
 }
 
 let capturedDataUrl = null;
-
-function handleCameraFileSelect(input) {
-  if (!input || !input.files || !input.files[0]) return;
-  const file = input.files[0];
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.getElementById("cameraCanvas") || document.createElement("canvas");
-      const maxDim = 640;
-      let w = img.width;
-      let h = img.height;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) {
-          h = Math.round((h * maxDim) / w);
-          w = maxDim;
-        } else {
-          w = Math.round((w * maxDim) / h);
-          h = maxDim;
-        }
-      }
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, w, h);
-      capturedDataUrl = canvas.toDataURL("image/jpeg", 0.6); // ضغط خفيف 60% للمزامنة السريعة
-
-      const previewImg = document.getElementById("cameraPreviewImg");
-      const video = document.getElementById("cameraVideo");
-      if (previewImg) {
-        previewImg.src = capturedDataUrl;
-        previewImg.style.display = "block";
-      }
-      if (video) video.style.display = "none";
-
-      const btnSnap = document.getElementById("btnSnapPhoto");
-      const btnConfirm = document.getElementById("btnConfirmPhoto");
-      const btnRetake = document.getElementById("btnRetakePhoto");
-      if (btnSnap) btnSnap.classList.add("hidden");
-      if (btnConfirm) btnConfirm.classList.remove("hidden");
-      if (btnRetake) btnRetake.classList.remove("hidden");
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-  input.value = "";
-}
 
 function takePhotoSnap() {
   const video = document.getElementById("cameraVideo");
