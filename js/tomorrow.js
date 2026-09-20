@@ -319,27 +319,12 @@ function renderTomorrowView() {
             <button type="button" class="rec-btn-quick zero" ${ro} onclick="onQuickSetTomorrowZero('${item.id}')">
               0 (لا يلزم)
             </button>
+            <button type="button" class="rem-mini-note-btn ${entry.notes ? 'has-notes' : ''}" onclick="toggleTomorrowNote('${item.id}')" title="ملاحظة للمطبخ">📝</button>
           </div>
         </div>
 
-        <!-- أزرار الزيادة السريعة المريحة للأوزان والأعداد -->
-        <div class="rec-stepper-chips-row">
-          ${isProtein ? `
-            <button type="button" class="rec-step-chip" ${ro} onclick="onQuickTomorrowIncrement('${item.id}', 1000)">+1 كجم</button>
-            <button type="button" class="rec-step-chip" ${ro} onclick="onQuickTomorrowIncrement('${item.id}', 5000)">+5 كجم</button>
-            <button type="button" class="rec-step-chip" ${ro} onclick="onQuickTomorrowIncrement('${item.id}', 10000)">+10 كجم</button>
-            <button type="button" class="rec-step-chip" ${ro} onclick="onQuickTomorrowIncrement('${item.id}', 20000)">+20 كجم</button>
-            <button type="button" class="rec-step-chip clear" ${ro} onclick="onQuickTomorrowClear('${item.id}')">✕ مسح</button>
-          ` : `
-            <button type="button" class="rec-step-chip" ${ro} onclick="onQuickTomorrowIncrement('${item.id}', 5)">+5</button>
-            <button type="button" class="rec-step-chip" ${ro} onclick="onQuickTomorrowIncrement('${item.id}', 10)">+10</button>
-            <button type="button" class="rec-step-chip" ${ro} onclick="onQuickTomorrowIncrement('${item.id}', 20)">+20</button>
-            <button type="button" class="rec-step-chip" ${ro} onclick="onQuickTomorrowIncrement('${item.id}', 50)">+50</button>
-            <button type="button" class="rec-step-chip clear" ${ro} onclick="onQuickTomorrowClear('${item.id}')">✕ مسح</button>
-          `}
-        </div>
-
-        <div class="notes-row" style="margin-top:6px;">
+        <!-- درج الملاحظات القابل للطي -->
+        <div class="rem-note-drawer ${entry.notes ? 'expanded' : 'hidden'}" id="tomnote-drawer-${item.id}">
           <input type="text" placeholder="ملاحظة للمطبخ المركزي (تقطيع خاص، توصيل مبكر...)" 
                  data-id="${item.id}" data-field="notes" 
                  value="${entry.notes || ""}" ${ro}
@@ -798,3 +783,18 @@ function confirmAddTomorrowItem(category) {
   renderTomorrowView();
   saveTomorrowNow(false);
 }
+
+let tomorrowNotesExpanded = {};
+function toggleTomorrowNote(itemId) {
+  tomorrowNotesExpanded[itemId] = !tomorrowNotesExpanded[itemId];
+  const drawer = document.getElementById("tomnote-drawer-" + itemId);
+  if (drawer) {
+    drawer.classList.toggle("hidden", !tomorrowNotesExpanded[itemId]);
+    drawer.classList.toggle("expanded", !!tomorrowNotesExpanded[itemId]);
+    if (tomorrowNotesExpanded[itemId]) {
+      const inp = drawer.querySelector("input");
+      if (inp) inp.focus();
+    }
+  }
+}
+
