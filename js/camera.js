@@ -67,16 +67,37 @@ async function savePhotoRecord(photoData) {
   photoData.uploaded = photoData.uploaded || false;
 
   if (db) {
-    return new Promise((resolve) => {
-      const tx = db.transaction("photos", "readwrite");
-      const store = tx.objectStore("photos");
-      store.put(photoData);
-      tx.oncomplete = () => resolve(photoData);
-      tx.onerror = () => resolve(savePhotoToLocalStorageFallback(photoData));
-    });
+    try {
+      await new Promise((resolve) => {
+        const tx = db.transaction("photos", "readwrite");
+        const store = tx.objectStore("photos");
+        store.put(photoData);
+        tx.oncomplete = () => resolve(photoData);
+        tx.onerror = () => resolve(savePhotoToLocalStorageFallback(photoData));
+      });
+    } catch (e) {
+      savePhotoToLocalStorageFallback(photoData);
+    }
   } else {
-    return savePhotoToLocalStorageFallback(photoData);
+    savePhotoToLocalStorageFallback(photoData);
   }
+
+  // المزامنة السحابية الفورية مع سوبابيس لتظهر لجميع الأجهزة واللابتوب
+  if (typeof SupaEngine !== "undefined" && SupaEngine.saveInspectionPhoto) {
+    try {
+      await SupaEngine.saveInspectionPhoto(photoData);
+      photoData.uploaded = true;
+    } catch (err) {
+      console.warn("Direct photo cloud sync failed, queuing via Sync:", err);
+      if (typeof Sync !== "undefined" && Sync.enqueue) {
+        Sync.enqueue("photo:" + photoData.id, "saveInspectionPhoto", photoData);
+      }
+    }
+  } else if (typeof Sync !== "undefined" && Sync.enqueue) {
+    Sync.enqueue("photo:" + photoData.id, "saveInspectionPhoto", photoData);
+  }
+
+  return photoData;
 }
 
 function savePhotoToLocalStorageFallback(photoData) {
@@ -91,18 +112,10 @@ function savePhotoToLocalStorageFallback(photoData) {
 }
 
 async function getPhotosForSession(sessionId) {
-  const db = await openMediaDatabase();
-  if (db) {
-    return new Promise((resolve) => {
-      const tx = db.transaction("photos", "readonly");
-      const store = tx.objectStore("photos");
-      const index = store.index("session");
-      const req = index.getAll(sessionId);
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => resolve(getPhotosFromLocalStorageFallback(sessionId));
-    });
-  }
-  return getPhotosFromLocalStorageFallback(sessionId);
+  const branch = (typeof Branch !== "undefined" ? Branch.get() : "") || (typeof allowedBranchList === "function" ? allowedBranchList()[0] : "");
+  const date = todayStr();
+  const all = await getAllPhotos(branch, date);
+  return all.filter(p => p.sessionId === sessionId);
 }
 
 function getPhotosFromLocalStorageFallback(sessionId) {
@@ -111,22 +124,52 @@ function getPhotosFromLocalStorageFallback(sessionId) {
 }
 
 async function getAllPhotos(branchFilter, dateFilter) {
-  const db = await openMediaDatabase();
-  let photos = [];
-  if (db) {
-    photos = await new Promise((resolve) => {
-      const tx = db.transaction("photos", "readonly");
-      const store = tx.objectStore("photos");
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => resolve([]);
-    });
-  } else {
-    photos = JSON.parse(localStorage.getItem("ph_local_photos") || "[]");
+  const bFilter = branchFilter || (typeof Branch !== "undefined" ? Branch.get() : "") || (typeof allowedBranchList === "function" ? allowedBranchList()[0] : "");
+  const dFilter = dateFilter || todayStr();
+
+  let localPhotos = [];
+  try {
+    const db = await openMediaDatabase();
+    if (db) {
+      localPhotos = await new Promise((resolve) => {
+        const tx = db.transaction("photos", "readonly");
+        const store = tx.objectStore("photos");
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
+    } else {
+      localPhotos = JSON.parse(localStorage.getItem("ph_local_photos") || "[]");
+    }
+  } catch (e) {
+    localPhotos = JSON.parse(localStorage.getItem("ph_local_photos") || "[]");
   }
 
-  if (branchFilter) photos = photos.filter(p => p.branch === branchFilter);
-  if (dateFilter) photos = photos.filter(p => p.date === dateFilter);
+  // جلب الصور السحابية من سوبابيس
+  let remotePhotos = [];
+  if (typeof SupaEngine !== "undefined" && SupaEngine.getInspectionPhotos && bFilter) {
+    try {
+      remotePhotos = await SupaEngine.getInspectionPhotos(dFilter, bFilter);
+    } catch (err) {
+      console.warn("Could not fetch remote photos:", err);
+    }
+  }
+
+  // دمج الصور ومنع التكرار
+  const map = new Map();
+  (remotePhotos || []).forEach(p => {
+    const key = p.id || (p.sessionId + "_" + p.checkpointId);
+    map.set(key, p);
+  });
+  (localPhotos || []).forEach(p => {
+    const key = p.id || (p.sessionId + "_" + p.checkpointId);
+    map.set(key, p);
+  });
+
+  let photos = Array.from(map.values());
+  if (bFilter) photos = photos.filter(p => !p.branch || p.branch === bFilter);
+  if (dFilter) photos = photos.filter(p => !p.date || p.date === dFilter);
+
   return photos.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 }
 
@@ -155,7 +198,9 @@ function openCameraModal(checkpointObj, callback) {
         </div>
 
         <div class="camera-controls">
+          <input type="file" id="cameraFileInput" accept="image/*" style="display:none;" onchange="handleCameraFileSelect(this)" />
           <button class="btn gold capture-btn" id="btnSnapPhoto" onclick="takePhotoSnap()">📷 التقاط الصورة</button>
+          <button class="btn secondary" id="btnChoosePhoto" onclick="document.getElementById('cameraFileInput').click()">📁 اختيار من الاستوديو</button>
           <button class="btn primary hidden" id="btnConfirmPhoto" onclick="confirmPhotoSnap()">✓ اعتماد الصورة</button>
           <button class="btn secondary hidden" id="btnRetakePhoto" onclick="retakePhotoSnap()">🔄 إعادة التصوير</button>
         </div>
@@ -205,18 +250,78 @@ function closeCameraModal() {
 
 let capturedDataUrl = null;
 
+function handleCameraFileSelect(input) {
+  if (!input || !input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById("cameraCanvas") || document.createElement("canvas");
+      const maxDim = 640;
+      let w = img.width;
+      let h = img.height;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      capturedDataUrl = canvas.toDataURL("image/jpeg", 0.6); // ضغط خفيف 60% للمزامنة السريعة
+
+      const previewImg = document.getElementById("cameraPreviewImg");
+      const video = document.getElementById("cameraVideo");
+      if (previewImg) {
+        previewImg.src = capturedDataUrl;
+        previewImg.style.display = "block";
+      }
+      if (video) video.style.display = "none";
+
+      const btnSnap = document.getElementById("btnSnapPhoto");
+      const btnConfirm = document.getElementById("btnConfirmPhoto");
+      const btnRetake = document.getElementById("btnRetakePhoto");
+      if (btnSnap) btnSnap.classList.add("hidden");
+      if (btnConfirm) btnConfirm.classList.remove("hidden");
+      if (btnRetake) btnRetake.classList.remove("hidden");
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  input.value = "";
+}
+
 function takePhotoSnap() {
   const video = document.getElementById("cameraVideo");
   const canvas = document.getElementById("cameraCanvas");
   const img = document.getElementById("cameraPreviewImg");
   if (!video || !canvas) return;
 
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
+  const maxDim = 640;
+  let w = video.videoWidth || 640;
+  let h = video.videoHeight || 480;
+  if (w > maxDim || h > maxDim) {
+    if (w > h) {
+      h = Math.round((h * maxDim) / w);
+      w = maxDim;
+    } else {
+      w = Math.round((w * maxDim) / h);
+      h = maxDim;
+    }
+  }
+
+  canvas.width = w;
+  canvas.height = h;
   const ctx = canvas.getContext("2d");
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  capturedDataUrl = canvas.toDataURL("image/jpeg", 0.7); // ضغط الصورة 70% للسرعة والأوفلاين
+  capturedDataUrl = canvas.toDataURL("image/jpeg", 0.6); // ضغط الصورة 60% للمزامنة السريعة
   img.src = capturedDataUrl;
   img.style.display = "block";
   video.style.display = "none";
