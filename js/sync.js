@@ -32,48 +32,59 @@ const Sync = (() => {
     localStorage.setItem("ph_cache:" + key, JSON.stringify({ value, fetchedAt: Date.now() }));
   }
 
+  const inFlightReads = new Map();
+
   // ---- طلبات القراءة (GET) — فائقة السرعة مع SupaEngine ----
   async function get(action, params, cacheKey, onFresh) {
     const ck = cacheKey || action;
     const cached = cacheGet(ck);
+
     // إذا كانت البيانات مخزنة محلياً بالكاش، اعرضها فوراً وبشكل فوري (0ms) للواجهة
-    // وحدّث الكاش في الخلفية بدون ما ينتظر المستخدم ثانية واحدة
     if (cached && cached.value !== null && cached.value !== undefined) {
+      // نتحقق إذا كان المفتاح قيد الجلب بالخلفية أصلاً لتفادي تكرار الطلبات وتجميد الجوال
       if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
-        setTimeout(async () => {
-          try {
-            let result = null;
-            const p = params || {};
-            switch (action) {
-              case "getItems": result = await SupaEngine.getItems(p.all === "1"); break;
-              case "getDay": result = await SupaEngine.getDay(p.date, p.branch); break;
-              case "getTomorrowOrder": result = await SupaEngine.getTomorrowOrder(p.date, p.branch); break;
-              case "getWasteReport": result = await SupaEngine.getWasteReport(p.date, p.branch); break;
-              case "getJuices": result = await SupaEngine.getJuices(p.all === "1"); break;
-              case "getJuiceDay": result = await SupaEngine.getJuiceDay(p.date, p.branch); break;
-              case "getSettings": result = await SupaEngine.getSettings(); break;
-              case "getEmployees": result = await SupaEngine.getEmployees(); break;
-              case "getSalesByCategory": result = await SupaEngine.getSalesByCategory(p.start, p.end, p.branch); break;
-              case "getReport": result = await SupaEngine.getReport(p.start, p.end, p.branch); break;
-              case "getDashboard": result = await SupaEngine.getDashboard(p.date); break;
-              case "getFlaggedItems": result = await SupaEngine.getFlaggedItems(p.start, p.end, (typeof Auth !== "undefined" && Auth.role && Auth.role() === "manager") ? Auth.branches() : null); break;
-              case "getRemainingReport": result = await SupaEngine.getDay(p.date, p.branch); break;
-              case "getInspectionPhotos": result = await SupaEngine.getInspectionPhotos(p.date, p.branch); break;
-              case "getChecklist": result = await SupaEngine.getChecklist(p.date, p.branch); break;
-            }
-            if (result !== null) {
-              // إذا كان الطلب هو getDay والبيانات المحلية تحتوي على قيم عبأها المستخدم ولم تُحفظ بعد بالسيرفر، لا نلغيها
-              if (action === "getDay" && cached && cached.value && cached.value.items) {
-                const localFilled = cached.value.items.filter(i => i.received !== "" && i.received != null);
-                if (localFilled.length > 0 && (!result.items || result.items.length === 0)) {
-                  return; // الحفاظ على بيانات المستخدم
-                }
+        if (!inFlightReads.has(ck)) {
+          const bgPromise = (async () => {
+            try {
+              let result = null;
+              const p = params || {};
+              switch (action) {
+                case "getItems": result = await SupaEngine.getItems(p.all === "1"); break;
+                case "getDay": result = await SupaEngine.getDay(p.date, p.branch); break;
+                case "getTomorrowOrder": result = await SupaEngine.getTomorrowOrder(p.date, p.branch); break;
+                case "getWasteReport": result = await SupaEngine.getWasteReport(p.date, p.branch); break;
+                case "getJuices": result = await SupaEngine.getJuices(p.all === "1"); break;
+                case "getJuiceDay": result = await SupaEngine.getJuiceDay(p.date, p.branch); break;
+                case "getSettings": result = await SupaEngine.getSettings(); break;
+                case "getEmployees": result = await SupaEngine.getEmployees(); break;
+                case "getSalesByCategory": result = await SupaEngine.getSalesByCategory(p.start, p.end, p.branch); break;
+                case "getReport": result = await SupaEngine.getReport(p.start, p.end, p.branch); break;
+                case "getDashboard": result = await SupaEngine.getDashboard(p.date); break;
+                case "getFlaggedItems": result = await SupaEngine.getFlaggedItems(p.start, p.end, (typeof Auth !== "undefined" && Auth.role && Auth.role() === "manager") ? Auth.branches() : null); break;
+                case "getRemainingReport": result = await SupaEngine.getDay(p.date, p.branch); break;
+                case "getInspectionPhotos": result = await SupaEngine.getInspectionPhotos(p.date, p.branch); break;
+                case "getChecklist": result = await SupaEngine.getChecklist(p.date, p.branch); break;
               }
-              cacheSet(ck, result);
-              if (onFresh) onFresh(result);
+              if (result !== null) {
+                // حماية تامة لمدخلات المستخدم: لا نلغي أي بيانات عبأها المستخدم محلياً
+                const currentLocal = cacheGet(ck);
+                if (action === "getDay" && currentLocal && currentLocal.value && currentLocal.value.items) {
+                  const localFilled = currentLocal.value.items.filter(i => i.received !== "" && i.received != null);
+                  if (localFilled.length > 0 && (!result.items || result.items.length === 0)) {
+                    return; // الحفاظ على مدخلات المستخدم ومنع تصفيرها
+                  }
+                }
+                cacheSet(ck, result);
+                if (onFresh) onFresh(result);
+              }
+            } catch (e) {
+              /* تجاهل أخطاء التحديث بالخلفية */
+            } finally {
+              inFlightReads.delete(ck);
             }
-          } catch (e) { /* background update ignore */ }
-        }, 0);
+          })();
+          inFlightReads.set(ck, bgPromise);
+        }
       }
       return cached.value;
     }
