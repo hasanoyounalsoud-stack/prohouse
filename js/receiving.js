@@ -285,23 +285,22 @@ function renderReceivingView() {
 
       html += `
         <div class="item-card receiving-item-card" data-item-id="${it.id}" data-status="${status}">
-          <!-- رأس الصنف -->
+          <!-- سطر معلومات الصنف الموحد (اسم، مطلوب، فرق، وجبات، حالة وحذف) -->
           <div class="rec-card-header">
-            <div class="rec-item-title-wrap">
+            <div class="rec-item-header-main">
               <span class="rec-item-name">${it.name}</span>
-              <span class="rec-item-unit">(${it.unit || "جرام"})</span>
-              ${it.isCustom ? '<span class="badge ok" style="font-size:10px;padding:2px 6px;">صنف إضافي</span>' : ''}
+              <span class="rec-item-unit">(${it.unit || "جم"})</span>
+              ${it.isCustom ? '<span class="badge ok rec-custom-badge">إضافي</span>' : ''}
+              <span class="rec-meta-chip rec-req-chip" title="المطلوب من المطبخ">📋 طلب: <strong>${ord !== "" ? ord : "—"}</strong></span>
+              <span class="rec-meta-chip rec-diff-chip ${diff < 0 ? 'diff-red' : (diff > 0 ? 'diff-orange' : (diff === 0 ? 'diff-green' : 'diff-gray'))}" id="recdiff-${it.id}">
+                ${diff === null ? '—' : (diff === 0 ? '✅ مطابق' : (diff < 0 ? `🔻 ${diff}` : `🔺 +${diff}`))}
+              </span>
+              ${isMeal ? `<span class="rec-meta-chip rec-meal-chip" id="recmeals-${it.id}">🍽 ${mealsCount(rec) || "0"} وجبة</span>` : ""}
             </div>
-            <div style="display:flex;align-items:center;gap:6px;">
+            <div class="rec-item-header-actions">
               <span class="badge ${badgeClass}">${status}</span>
               <button type="button" class="rec-btn-remove" onclick="onRemoveReceivingItem('${it.id}', '${String(it.name).replace(/'/g, "\\'")}')" title="حذف الصنف من استلام اليوم">✕</button>
             </div>
-          </div>
-
-          <!-- شريط المطلوب من المطبخ -->
-          <div class="rec-ordered-info-bar">
-            <span>📋 المطلوب من المطبخ: <strong>${ord !== "" ? ord : "—"}</strong></span>
-            ${isMeal && ord ? `<span class="rec-ordered-meals">≈ ${mealsCount(ord)} وجبة</span>` : ""}
           </div>
 
           <!-- سطر الإدخال المخصص للجوال (Touch Input Row) -->
@@ -328,19 +327,6 @@ function renderReceivingView() {
                 لم يصل (0)
               </button>
             </div>
-          </div>
-
-          <!-- شريط الفروقات الحية وعدد الوجبات -->
-          <div class="rec-live-diff-bar">
-            ${diff !== null ? `
-              <div class="rec-diff-text ${diff < 0 ? 'text-red' : (diff > 0 ? 'text-orange' : 'text-green')}">
-                ${diff === 0 ? '✅ مطابق تماماً للمطلوب' : (diff < 0 ? `🔻 نقص: ${diff} ${it.unit || 'جم'}` : `🔺 زيادة: +${diff} ${it.unit || 'جم'}`)}
-              </div>
-            ` : '<div class="rec-diff-text text-muted">— لم يتم تسجيل الوزن بعد</div>'}
-
-            ${isMeal ? `
-              <span class="rec-meal-calc" id="recmeals-${it.id}">🍽 الوجبات: ${mealsCount(rec) || "0"}</span>
-            ` : ""}
           </div>
 
           <!-- زر وحقل الملاحظات الذكية -->
@@ -504,11 +490,11 @@ function updateReceivingItemCardUI(itemId) {
 
   // تحديث عدد الوجبات
   const mealsEl = document.getElementById("recmeals-" + itemId);
-  if (mealsEl) mealsEl.textContent = "🍽 الوجبات: " + (mealsCount(recVal) || "0");
+  if (mealsEl) mealsEl.textContent = "🍽 " + (mealsCount(recVal) || "0") + " وجبة";
   updateReceivingCategoryCount(itemId);
 
   // تحديث الباج
-  const badge = card.querySelector(".rec-card-header .badge:not(.ok)");
+  const badge = card.querySelector(".rec-item-header-actions .badge:not(.ok), .rec-card-header .badge:not(.ok)");
   if (badge) {
     badge.textContent = status;
     badge.className = "badge " + (status === "مكتمل" ? "ok" : (status === "ناقص" ? "warn" : (status === "زائد" ? "surplus" : "neutral")));
@@ -520,15 +506,15 @@ function updateReceivingItemCardUI(itemId) {
     input.className = "rec-main-input " + (diff < 0 ? 'border-red' : (diff > 0 ? 'border-orange' : (hasValue ? 'border-green' : '')));
   }
 
-  // تحديث سطر الفرق الملون
-  const diffEl = card.querySelector(".rec-live-diff-bar .rec-diff-text");
+  // تحديث شريحة الفرق
+  const diffEl = document.getElementById("recdiff-" + itemId);
   if (diffEl) {
     if (diff !== null) {
-      diffEl.className = "rec-diff-text " + (diff < 0 ? 'text-red' : (diff > 0 ? 'text-orange' : 'text-green'));
-      diffEl.innerHTML = diff === 0 ? '✅ مطابق تماماً للمطلوب' : (diff < 0 ? `🔻 نقص: ${diff}` : `🔺 زيادة: +${diff}`);
+      diffEl.className = "rec-meta-chip rec-diff-chip " + (diff < 0 ? 'diff-red' : (diff > 0 ? 'diff-orange' : 'diff-green'));
+      diffEl.innerHTML = diff === 0 ? '✅ مطابق' : (diff < 0 ? `🔻 ${diff}` : `🔺 +${diff}`);
     } else {
-      diffEl.className = "rec-diff-text text-muted";
-      diffEl.textContent = "— لم يتم تسجيل الوزن بعد";
+      diffEl.className = "rec-meta-chip rec-diff-chip diff-gray";
+      diffEl.textContent = "—";
     }
   }
 }
