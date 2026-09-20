@@ -737,15 +737,15 @@ const SupaEngine = (() => {
   async function getChecklist(date, branch) {
     try {
       const res = await query(`day_meta?select=payments_report_link&date=eq.${date}&branch=eq.${encodeURIComponent(branch)}`);
-      if (!res || !res.length || !res[0].payments_report_link) return null;
+      if (!res || !res.length || !res[0].payments_report_link) return {};
       const raw = res[0].payments_report_link;
       if (raw.startsWith("{")) {
         return JSON.parse(raw);
       }
-      return null;
+      return {};
     } catch (e) {
       console.warn("getChecklist error:", e);
-      return null;
+      return {};
     }
   }
 

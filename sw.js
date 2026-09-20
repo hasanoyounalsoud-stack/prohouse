@@ -1,7 +1,7 @@
 // Service Worker: Pro House Operations Center v4.3.5
 // يخزّن هيكل التطبيق (HTML/CSS/JS) محلياً لدعم العمل أوفلاين التام للموظفين والفروع.
 
-const CACHE_NAME = "prohouse-shell-v4.7.3";
+const CACHE_NAME = "prohouse-shell-v4.7.4";
 
 // التخزين المسبق ضروري: بدونه أول فتحة بدون نت بتفشل كلياً لأنه ما في شي مخزّن أصلاً.
 // أي ملف جديد ينضاف لـ index.html لازم ينضاف هون كمان، وإلا التطبيق بينكسر أوفلاين بس.
@@ -56,28 +56,22 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  const isAppCode = url.pathname.endsWith(".html") || url.pathname.endsWith(".js") ||
-                    url.pathname.endsWith(".css") || url.pathname.endsWith(".json") ||
-                    url.pathname.endsWith("/");
-
   const fromCache = () => caches.match(req, { ignoreSearch: true });
 
-  if (isAppCode) {
-    event.respondWith(
-      fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-        return res;
-      }).catch(fromCache)
-    );
-    return;
-  }
-
+  // استراتيجية Stale-While-Revalidate فائقة السرعة للتطبيق:
+  // تقديم الملفات فوراً وبشكل لحظي (0ms) من الكاش المحلي بالجهاز،
+  // وتحديث الكاش بالخلفية بدون إبطاء المستخدم أو انتظار شبكة الجوال
   event.respondWith(
-    fromCache().then((cached) => cached || fetch(req).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-      return res;
-    }))
+    fromCache().then((cached) => {
+      const fetchPromise = fetch(req).then((res) => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        }
+        return res;
+      }).catch(() => null);
+
+      return cached || fetchPromise;
+    })
   );
 });

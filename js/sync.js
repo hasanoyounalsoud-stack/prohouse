@@ -39,6 +39,7 @@ const Sync = (() => {
 
     // إذا كان متاحاً محرك Supabase، نستخدمه مباشرةً وتكون الاستجابة في بضع ملي ثوانٍ!
     if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
+      let handled = true;
       try {
         let result = null;
         const p = params || {};
@@ -59,16 +60,23 @@ const Sync = (() => {
           case "getInspectionPhotos": result = await SupaEngine.getInspectionPhotos(p.date, p.branch); break;
           case "getChecklist": result = await SupaEngine.getChecklist(p.date, p.branch); break;
           default:
+            handled = false;
             console.warn("Action not handled directly in SupaEngine:", action);
         }
 
-        if (result !== null) {
+        if (handled) {
           cacheSet(ck, result);
           if (onFresh) onFresh(result);
           return result;
         }
       } catch (err) {
         console.warn("SupaEngine get fallback:", action, err);
+        if (handled) {
+          if (cached && cached.value !== null && cached.value !== undefined) {
+            return cached.value;
+          }
+          return null;
+        }
       }
     }
 
