@@ -37,10 +37,18 @@ const SupaEngine = (() => {
 
   async function query(endpoint, options = {}) {
     const url = SUPABASE_URL + "/rest/v1/" + endpoint;
-    const res = await fetch(url, {
-      ...options,
-      headers: getHeaders(options.headers)
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    let res;
+    try {
+      res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: getHeaders(options.headers)
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (!res.ok) {
       // رسائل الخطأ العربية اللي بترجع من الداتابيس (raise exception) بينعرضوا زي ما هني
       let msg = "";
