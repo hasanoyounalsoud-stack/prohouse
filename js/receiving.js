@@ -4,6 +4,8 @@ let currentReceivingDate = todayStr();
 let currentReceivingBranch = "";
 let currentReceivingData = {}; // itemId -> { received, notes, status, cookName }
 let currentReceivingOrdered = {}; // itemId -> orderedQty from yesterday's production order
+let currentReceivingExtraItems = []; // [{ id, name, unit, category, isCustom: true }]
+let currentReceivingRemovedIds = new Set(); // set of removed item ids
 let isReceivingSaving = false;
 let receivingActiveFilter = "all"; // 'all', 'unreceived', 'mismatch'
 let receivingCollapsed = {};
@@ -30,6 +32,8 @@ async function loadReceivingData(date, branch) {
   // 2) جلب السجل المحفوظ لهذا اليوم والفرع
   const dayData = await Sync.get("getDay", { date: currentReceivingDate, branch: currentReceivingBranch }, "day:" + currentReceivingDate + ":" + currentReceivingBranch);
   currentReceivingData = {};
+  currentReceivingExtraItems = [];
+  currentReceivingRemovedIds = new Set();
   
   if (dayData && dayData.items) {
     dayData.items.forEach(it => {
@@ -39,10 +43,36 @@ async function loadReceivingData(date, branch) {
         cookName: it.cookName || "",
         status: it.status || computeReceivingItemStatus(it.received, currentReceivingOrdered[it.itemId])
       };
+
+      const existingInCatalog = Items.current.some(catalogIt => catalogIt.id === it.itemId);
+      if (!existingInCatalog && (it.isCustom || String(it.itemId).startsWith("custom_rec_") || it.itemName)) {
+        currentReceivingExtraItems.push({
+          id: it.itemId,
+          name: it.itemName,
+          unit: it.unit || "جرام",
+          category: it.category || "عام",
+          isCustom: true
+        });
+      }
     });
+
+    if (Array.isArray(dayData.removedItemIds)) {
+      dayData.removedItemIds.forEach(id => currentReceivingRemovedIds.add(id));
+    }
   }
 
   renderReceivingView();
+}
+
+function getAllReceivingActiveItems() {
+  const baseItems = Items.current.filter(it => {
+    if (currentReceivingRemovedIds.has(it.id)) return false;
+    const branches = itemBranches(it);
+    return !branches.length || branches.includes(currentReceivingBranch);
+  });
+
+  const extraItems = currentReceivingExtraItems.filter(it => !currentReceivingRemovedIds.has(it.id));
+  return [...baseItems, ...extraItems];
 }
 
 function computeReceivingItemStatus(receivedVal, orderedVal) {
@@ -90,12 +120,12 @@ function renderReceivingView() {
   const view = document.getElementById("receivingView");
   if (!view) return;
 
-  const items = Items.current;
   const branchList = allowedBranchList();
-  
   if (!currentReceivingBranch && branchList.length > 0) {
     currentReceivingBranch = branchList[0];
   }
+
+  const items = getAllReceivingActiveItems();
 
   // تجميع الإحصائيات
   let totalItemsCount = 0;
@@ -107,9 +137,6 @@ function renderReceivingView() {
   let matchedCount = 0;
 
   items.forEach(it => {
-    const branches = itemBranches(it);
-    if (branches.length && !branches.includes(currentReceivingBranch)) return;
-
     totalItemsCount++;
     const ord = Number(currentReceivingOrdered[it.id] || 0);
     const recData = currentReceivingData[it.id] || {};
@@ -205,8 +232,6 @@ function renderReceivingView() {
   // تجميع الأصناف حسب التصنيف
   const byCat = {};
   items.forEach(it => {
-    const branches = itemBranches(it);
-    if (branches.length && !branches.includes(currentReceivingBranch)) return;
     const cat = it.category || "عام";
     if (!byCat[cat]) byCat[cat] = [];
     byCat[cat].push(it);
@@ -255,7 +280,7 @@ function renderReceivingView() {
       if (status === "زائد") badgeClass = "surplus";
       if (status === "لم يصل") badgeClass = "neutral";
 
-      const isWeight = isMealCategory(it.category) || (it.unit && (it.unit.includes("جرام") || it.unit.includes("جم") || it.unit.includes("كجم") || it.unit.includes("1/3") || it.unit.includes("1/2")));
+      const isMeal = isMealCategory(it.category);
       const notesExpanded = receivingNotesExpanded[it.id] || !!recData.notes;
 
       html += `
@@ -265,14 +290,18 @@ function renderReceivingView() {
             <div class="rec-item-title-wrap">
               <span class="rec-item-name">${it.name}</span>
               <span class="rec-item-unit">(${it.unit || "جرام"})</span>
+              ${it.isCustom ? '<span class="badge ok" style="font-size:10px;padding:2px 6px;">صنف إضافي</span>' : ''}
             </div>
-            <span class="badge ${badgeClass}">${status}</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span class="badge ${badgeClass}">${status}</span>
+              <button type="button" class="rec-btn-remove" onclick="onRemoveReceivingItem('${it.id}', '${String(it.name).replace(/'/g, "\\'")}')" title="حذف الصنف من استلام اليوم">✕</button>
+            </div>
           </div>
 
           <!-- شريط المطلوب من المطبخ -->
           <div class="rec-ordered-info-bar">
             <span>📋 المطلوب من المطبخ: <strong>${ord !== "" ? ord : "—"}</strong></span>
-            ${isMealCategory(it.category) && ord ? `<span class="rec-ordered-meals">≈ ${mealsCount(ord)} وجبة</span>` : ""}
+            ${isMeal && ord ? `<span class="rec-ordered-meals">≈ ${mealsCount(ord)} وجبة</span>` : ""}
           </div>
 
           <!-- سطر الإدخال المخصص للجوال (Touch Input Row) -->
@@ -301,23 +330,6 @@ function renderReceivingView() {
             </div>
           </div>
 
-          <!-- أزرار الزيادة السريعة المريحة للأوزان والأعداد (Stepper Chips) -->
-          <div class="rec-stepper-chips-row">
-            ${isWeight ? `
-              <button type="button" class="rec-step-chip" onclick="onQuickIncrement('${it.id}', 100)">+100</button>
-              <button type="button" class="rec-step-chip" onclick="onQuickIncrement('${it.id}', 500)">+500</button>
-              <button type="button" class="rec-step-chip" onclick="onQuickIncrement('${it.id}', 1000)">+1 كجم</button>
-              <button type="button" class="rec-step-chip" onclick="onQuickIncrement('${it.id}', 2000)">+2 كجم</button>
-              <button type="button" class="rec-step-chip clear" onclick="onQuickClear('${it.id}')">✕ مسح</button>
-            ` : `
-              <button type="button" class="rec-step-chip" onclick="onQuickIncrement('${it.id}', 1)">+1</button>
-              <button type="button" class="rec-step-chip" onclick="onQuickIncrement('${it.id}', 5)">+5</button>
-              <button type="button" class="rec-step-chip" onclick="onQuickIncrement('${it.id}', 10)">+10</button>
-              <button type="button" class="rec-step-chip minus" onclick="onQuickIncrement('${it.id}', -1)">-1</button>
-              <button type="button" class="rec-step-chip clear" onclick="onQuickClear('${it.id}')">✕ مسح</button>
-            `}
-          </div>
-
           <!-- شريط الفروقات الحية وعدد الوجبات -->
           <div class="rec-live-diff-bar">
             ${diff !== null ? `
@@ -326,7 +338,7 @@ function renderReceivingView() {
               </div>
             ` : '<div class="rec-diff-text text-muted">— لم يتم تسجيل الوزن بعد</div>'}
 
-            ${isMealCategory(it.category) ? `
+            ${isMeal ? `
               <span class="rec-meal-calc" id="recmeals-${it.id}">🍽 الوجبات: ${mealsCount(rec) || "0"}</span>
             ` : ""}
           </div>
@@ -349,7 +361,12 @@ function renderReceivingView() {
       `;
     });
 
-    html += `</div></div></div>`;
+    // زر إضافة صنف تحت كل قسم
+    html += `
+        <button type="button" class="rec-add-item-btn" onclick="openAddReceivingItemModal('${String(cat).replace(/'/g, "\\'")}')">
+          ➕ إضافة صنف في قسم (${cat})
+        </button>
+      </div></div></div>`;
   });
 
   view.innerHTML = html;
@@ -410,11 +427,9 @@ function toggleReceivingNote(itemId) {
 }
 
 function onMatchAllReceiving() {
-  const items = Items.current;
+  const items = getAllReceivingActiveItems();
   let count = 0;
   items.forEach(it => {
-    const branches = itemBranches(it);
-    if (branches.length && !branches.includes(currentReceivingBranch)) return;
     const ord = currentReceivingOrdered[it.id];
     if (ord !== undefined && ord !== null && ord !== "") {
       if (!currentReceivingData[it.id]) currentReceivingData[it.id] = { received: "", notes: "", cookName: "" };
@@ -430,18 +445,15 @@ function onMatchAllReceiving() {
 }
 
 function updateReceivingCategoryCount(itemId) {
-  const item = Items.current.find(it => it.id === itemId);
+  const allItems = getAllReceivingActiveItems();
+  const item = allItems.find(it => it.id === itemId);
   if (!item) return;
   const cat = item.category || "عام";
   const section = document.querySelector(`.category-section[data-cat="${cat}"]`);
   const counter = section && section.querySelector(".cat-count");
   if (!counter) return;
 
-  const inCat = Items.current.filter(it => {
-    if ((it.category || "عام") !== cat) return false;
-    const b = itemBranches(it);
-    return !b.length || b.includes(currentReceivingBranch);
-  });
+  const inCat = allItems.filter(it => (it.category || "عام") === cat);
   const done = inCat.filter(it => {
     const r = (currentReceivingData[it.id] || {}).received;
     return r !== "" && r !== null && r !== undefined;
@@ -496,7 +508,7 @@ function updateReceivingItemCardUI(itemId) {
   updateReceivingCategoryCount(itemId);
 
   // تحديث الباج
-  const badge = card.querySelector(".rec-card-header .badge");
+  const badge = card.querySelector(".rec-card-header .badge:not(.ok)");
   if (badge) {
     badge.textContent = status;
     badge.className = "badge " + (status === "مكتمل" ? "ok" : (status === "ناقص" ? "warn" : (status === "زائد" ? "surplus" : "neutral")));
@@ -521,15 +533,121 @@ function updateReceivingItemCardUI(itemId) {
   }
 }
 
+// ---- وظائف إزالة وإضافة الأصناف في الاستلام ----
+
+function onRemoveReceivingItem(itemId, itemName) {
+  const confirmed = confirm(`هل أنت متأكد من إزالة الصنف "${itemName || ''}" من استلام اليوم؟`);
+  if (!confirmed) return;
+
+  currentReceivingRemovedIds.add(itemId);
+  currentReceivingExtraItems = currentReceivingExtraItems.filter(it => it.id !== itemId);
+  delete currentReceivingData[itemId];
+
+  showToast(`🗑️ تم استبعاد الصنف من استلام اليوم`);
+  renderReceivingView();
+  saveLocalDebounced();
+  updateSaveBarReceivingStatus();
+}
+
+function openAddReceivingItemModal(category) {
+  const existingModal = document.getElementById("customReceivingModal");
+  if (existingModal) existingModal.remove();
+
+  const modalHtml = `
+    <div class="custom-rec-modal-backdrop" id="customReceivingModal" onclick="if(event.target===this) closeAddReceivingItemModal()">
+      <div class="custom-rec-modal-box">
+        <div class="custom-rec-modal-header">
+          <h3>➕ إضافة صنف جديد لقسم (${category})</h3>
+          <button type="button" class="custom-rec-modal-close" onclick="closeAddReceivingItemModal()">✕</button>
+        </div>
+        <div class="custom-rec-modal-body">
+          <div class="custom-rec-field-group">
+            <label>اسم الصنف الذي أرسله الشيف *</label>
+            <input type="text" id="customRecItemName" placeholder="مثال: دجاج كرسبي إضافي، صوص رانش خاص..." autofocus>
+          </div>
+          <div class="custom-rec-field-group">
+            <label>وحدة القياس</label>
+            <select id="customRecItemUnit">
+              <option value="جرام" selected>جرام (جم)</option>
+              <option value="كجم">كيلو جرام (كجم)</option>
+              <option value="حبة">حبة</option>
+              <option value="علبة">علبة</option>
+              <option value="لتر">لتر</option>
+            </select>
+          </div>
+          <div class="custom-rec-field-group">
+            <label>الكمية المستلمة الفعلية الصباحية</label>
+            <input type="number" step="any" min="0" inputmode="decimal" id="customRecItemQty" placeholder="0">
+          </div>
+          <div class="custom-rec-modal-actions">
+            <button type="button" class="btn-save" onclick="confirmAddReceivingItem('${String(category).replace(/'/g, "\\'")}')">✅ إضافة للاستلام</button>
+            <button type="button" class="btn-cancel" onclick="closeAddReceivingItemModal()">إلغاء</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+  setTimeout(() => {
+    const input = document.getElementById("customRecItemName");
+    if (input) input.focus();
+  }, 100);
+}
+
+function closeAddReceivingItemModal() {
+  const modal = document.getElementById("customReceivingModal");
+  if (modal) modal.remove();
+}
+
+function confirmAddReceivingItem(category) {
+  const nameInput = document.getElementById("customRecItemName");
+  const unitInput = document.getElementById("customRecItemUnit");
+  const qtyInput = document.getElementById("customRecItemQty");
+
+  const name = (nameInput?.value || "").trim();
+  const unit = unitInput?.value || "جرام";
+  const qty = (qtyInput?.value || "").trim();
+
+  if (!name) {
+    alert("يرجى كتابة اسم الصنف أولاً!");
+    if (nameInput) nameInput.focus();
+    return;
+  }
+
+  const newCustomId = "custom_rec_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+  const newItem = {
+    id: newCustomId,
+    name: name,
+    unit: unit,
+    category: category,
+    isCustom: true
+  };
+
+  currentReceivingExtraItems.push(newItem);
+  currentReceivingData[newCustomId] = {
+    received: qty !== "" ? String(qty) : "",
+    notes: "صنف إضافي من المطبخ",
+    cookName: "",
+    status: computeReceivingItemStatus(qty, 0)
+  };
+  currentReceivingOrdered[newCustomId] = 0;
+
+  closeAddReceivingItemModal();
+  showToast(`✅ تم إضافة صنف "${name}" إلى قسم ${category}`);
+  renderReceivingView();
+  saveLocalDebounced();
+  updateSaveBarReceivingStatus();
+}
+
 // حفظ محلي لحظي ذكي (Auto-Save Debounce) لضمان عدم ضياع أي حرف في الجوال
 let saveLocalTimer = null;
 function saveLocalDebounced() {
   clearTimeout(saveLocalTimer);
   saveLocalTimer = setTimeout(() => {
+    const allItems = getAllReceivingActiveItems();
     const itemsPayload = [];
-    Items.current.forEach(it => {
-      const branches = itemBranches(it);
-      if (branches.length && !branches.includes(currentReceivingBranch)) return;
+    allItems.forEach(it => {
       const data = currentReceivingData[it.id] || { received: "", notes: "" };
       const ord = currentReceivingOrdered[it.id] || 0;
       const rec = data.received;
@@ -537,6 +655,8 @@ function saveLocalDebounced() {
         itemId: it.id,
         itemName: it.name,
         unit: it.unit || "جرام",
+        category: it.category || "عام",
+        isCustom: !!it.isCustom,
         ordered: ord,
         received: rec,
         status: computeReceivingItemStatus(rec, ord),
@@ -548,7 +668,8 @@ function saveLocalDebounced() {
     Sync.cacheSet("day:" + currentReceivingDate + ":" + currentReceivingBranch, { 
       date: currentReceivingDate, 
       branch: currentReceivingBranch, 
-      items: itemsPayload 
+      items: itemsPayload,
+      removedItemIds: Array.from(currentReceivingRemovedIds)
     });
   }, 400);
 }
@@ -568,11 +689,9 @@ async function saveReceivingReportData() {
   const saveBtn = document.getElementById("receivingSaveBtn");
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "جاري حفظ التقرير…"; }
 
+  const allItems = getAllReceivingActiveItems();
   const itemsPayload = [];
-  Items.current.forEach(it => {
-    const branches = itemBranches(it);
-    if (branches.length && !branches.includes(currentReceivingBranch)) return;
-
+  allItems.forEach(it => {
     const data = currentReceivingData[it.id] || { received: "", notes: "" };
     const ord = currentReceivingOrdered[it.id] || 0;
     const rec = data.received;
@@ -582,6 +701,8 @@ async function saveReceivingReportData() {
       itemId: it.id,
       itemName: it.name,
       unit: it.unit || "جرام",
+      category: it.category || "عام",
+      isCustom: !!it.isCustom,
       ordered: ord,
       received: rec,
       status: status,
@@ -596,10 +717,16 @@ async function saveReceivingReportData() {
     branch: currentReceivingBranch,
     employeeName: emp ? emp.name : "",
     items: itemsPayload,
+    removedItemIds: Array.from(currentReceivingRemovedIds),
     savedAt: new Date().toISOString()
   };
 
-  Sync.cacheSet("day:" + currentReceivingDate + ":" + currentReceivingBranch, { date: currentReceivingDate, branch: currentReceivingBranch, items: itemsPayload });
+  Sync.cacheSet("day:" + currentReceivingDate + ":" + currentReceivingBranch, { 
+    date: currentReceivingDate, 
+    branch: currentReceivingBranch, 
+    items: itemsPayload,
+    removedItemIds: Array.from(currentReceivingRemovedIds)
+  });
   Sync.enqueue("saveDay:" + currentReceivingDate + ":" + currentReceivingBranch, "saveDay", payload);
 
   showToast("✅ تم حفظ تقرير الاستلام بنجاح!");
