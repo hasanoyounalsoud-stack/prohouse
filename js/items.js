@@ -6,14 +6,51 @@ const Items = (() => {
 
   function isActive(it) { return it.active !== false && it.active !== "FALSE"; }
 
+  function ensureMeatItems(list) {
+    if (!Array.isArray(list)) return list || [];
+    let modified = false;
+    // تنظيف أو نقل أي صنف قديم باسم لحم الشيف تحت بحري
+    list.forEach(it => {
+      if (it && it.name === 'لحم الشيف' && it.category === 'بحري') {
+        it.category = 'لحم';
+        it.name = 'لحم الشيف 1';
+        modified = true;
+      }
+    });
+
+    const meatNames = ['لحم الشيف 1', 'لحم الشيف 2', 'لحم الشيف 3'];
+    meatNames.forEach((mName, idx) => {
+      const exists = list.some(it => it && (it.name === mName || (it.category === 'لحم' && it.sortOrder === idx + 1)));
+      if (!exists) {
+        list.push({
+          id: 'it_meat_' + (idx + 1),
+          category: 'لحم',
+          name: mName,
+          unit: '1/3',
+          hasCustomName: true,
+          branches: '',
+          active: true,
+          sortOrder: idx + 1
+        });
+        modified = true;
+      }
+    });
+
+    if (modified) {
+      Sync.cacheSet("items_v2", list);
+    }
+    return list;
+  }
+
   async function load() {
     if (loadingPromise) return loadingPromise; // يتفادى نداءات متزامنة مكررة (تنادى من إدخال اليوم/طلبية الغد/إدارة الأصناف بنفس الوقت)
     loadingPromise = (async () => {
       const data = await Sync.get("getItems", { all: "1" }, "items_v2", (val) => {
-        current = (val || []).filter(isActive);
+        current = ensureMeatItems((val || []).filter(isActive));
         renderIfActive();
       });
-      if (data) current = data.filter(isActive);
+      if (data) current = ensureMeatItems(data.filter(isActive));
+      else current = ensureMeatItems(current);
       renderIfActive();
       return current;
     })();
