@@ -688,6 +688,104 @@ const SupaEngine = (() => {
     return { date, branches: out };
   }
 
+  // --- صور الفحص البصري والمعاينة الميدانية (Inspection Photos) ---
+  async function getInspectionPhotos(date, branch) {
+    try {
+      const res = await query(`day_meta?select=sales_report_link&date=eq.${date}&branch=eq.${encodeURIComponent(branch)}`);
+      if (!res || !res.length || !res[0].sales_report_link) return [];
+      const raw = res[0].sales_report_link;
+      if (raw.startsWith("[") || raw.startsWith("{")) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && Array.isArray(parsed.photos)) return parsed.photos;
+      }
+      return [];
+    } catch (e) {
+      console.warn("getInspectionPhotos error:", e);
+      return [];
+    }
+  }
+
+  async function saveInspectionPhoto(photoObj) {
+    const { date, branch } = photoObj;
+    if (!date || !branch) return photoObj;
+    let existingPhotos = await getInspectionPhotos(date, branch);
+    const idx = existingPhotos.findIndex(p => p.id === photoObj.id || (photoObj.sessionId && p.sessionId === photoObj.sessionId && p.checkpointId === photoObj.checkpointId));
+    if (idx >= 0) {
+      existingPhotos[idx] = photoObj;
+    } else {
+      existingPhotos.push(photoObj);
+    }
+    if (existingPhotos.length > 50) {
+      existingPhotos = existingPhotos.slice(-50);
+    }
+    await query("day_meta", {
+      method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify({
+        date,
+        branch,
+        sales_report_link: JSON.stringify(existingPhotos),
+        employee_name: photoObj.employeeName || "",
+        updated_at: new Date().toISOString()
+      })
+    });
+    return photoObj;
+  }
+
+  async function deleteInspectionPhoto(photoId, date, branch) {
+    if (!date || !branch) return [];
+    let existingPhotos = await getInspectionPhotos(date, branch);
+    existingPhotos = existingPhotos.filter(p => p.id !== photoId);
+
+    await query("day_meta", {
+      method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify({
+        date,
+        branch,
+        sales_report_link: JSON.stringify(existingPhotos),
+        updated_at: new Date().toISOString()
+      })
+    });
+    return existingPhotos;
+  }
+
+  // --- قائمة الفحص والافتتاح اليومي (Daily Shift Checklist) ---
+  async function getChecklist(date, branch) {
+    try {
+      const res = await query(`day_meta?select=payments_report_link&date=eq.${date}&branch=eq.${encodeURIComponent(branch)}`);
+      if (!res || !res.length || !res[0].payments_report_link) return {};
+      const raw = res[0].payments_report_link;
+      if (raw.startsWith("{")) {
+        return JSON.parse(raw);
+      }
+      return {};
+    } catch (e) {
+      console.warn("getChecklist error:", e);
+      return {};
+    }
+  }
+
+  async function saveChecklist(payload) {
+    const { date, branch, shift, data } = payload;
+    if (!date || !branch) return;
+    let existing = await getChecklist(date, branch) || {};
+    existing[shift || "morning"] = data;
+    await query("day_meta", {
+      method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify({
+        date,
+        branch,
+        payments_report_link: JSON.stringify(existing),
+        employee_name: (data && data.updatedBy) || "",
+        updated_at: new Date().toISOString()
+      })
+    });
+    return existing;
+  }
+
   return {
     login,
     changePin,
@@ -712,6 +810,11 @@ const SupaEngine = (() => {
     getSalesByCategory,
     getReport,
     getFlaggedItems,
-    getDashboard
+    getDashboard,
+    getInspectionPhotos,
+    saveInspectionPhoto,
+    deleteInspectionPhoto,
+    getChecklist,
+    saveChecklist
   };
 })();

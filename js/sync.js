@@ -39,6 +39,7 @@ const Sync = (() => {
 
     // إذا كان متاحاً محرك Supabase، نستخدمه مباشرةً وتكون الاستجابة في بضع ملي ثوانٍ!
     if (typeof SupaEngine !== "undefined" && typeof SUPABASE_URL !== "undefined" && SUPABASE_URL) {
+      let handled = true;
       try {
         let result = null;
         const p = params || {};
@@ -56,17 +57,26 @@ const Sync = (() => {
           case "getDashboard": result = await SupaEngine.getDashboard(p.date); break;
           case "getFlaggedItems": result = await SupaEngine.getFlaggedItems(p.start, p.end, (typeof Auth !== "undefined" && Auth.role && Auth.role() === "manager") ? Auth.branches() : null); break;
           case "getRemainingReport": result = await SupaEngine.getDay(p.date, p.branch); break;
+          case "getInspectionPhotos": result = await SupaEngine.getInspectionPhotos(p.date, p.branch); break;
+          case "getChecklist": result = await SupaEngine.getChecklist(p.date, p.branch); break;
           default:
+            handled = false;
             console.warn("Action not handled directly in SupaEngine:", action);
         }
 
-        if (result !== null) {
+        if (handled) {
           cacheSet(ck, result);
           if (onFresh) onFresh(result);
           return result;
         }
       } catch (err) {
         console.warn("SupaEngine get fallback:", action, err);
+        if (handled) {
+          if (cached && cached.value !== null && cached.value !== undefined) {
+            return cached.value;
+          }
+          return null;
+        }
       }
     }
 
@@ -141,6 +151,8 @@ const Sync = (() => {
           case "saveWasteReport": res = await SupaEngine.saveWasteReport(payload); break;
           case "saveJuiceDay": res = await SupaEngine.saveJuiceDay(payload); break;
           case "saveSettings": res = await SupaEngine.saveSettings(payload); break;
+          case "saveInspectionPhoto": res = await SupaEngine.saveInspectionPhoto(payload); break;
+          case "saveChecklist": res = await SupaEngine.saveChecklist(payload); break;
           default:
             handled = false;
             console.warn("Action not handled in SupaEngine postOnce:", action);

@@ -55,14 +55,21 @@ const Checklist = (() => {
     data.updatedBy = emp ? emp.name : "موظف";
     localStorage.setItem(key, JSON.stringify(data));
 
-    // مزامنة أونلاين عند تفرع الخدمة لو متوفر
-    if (typeof Sync !== "undefined" && Sync.queueAction) {
-      Sync.queueAction("saveChecklist", {
+    // مزامنة أونلاين سحابياً مع سوبابيس لتظهر لكافة الأجهزة
+    if (typeof SupaEngine !== "undefined" && SupaEngine.saveChecklist) {
+      SupaEngine.saveChecklist({
         date: dateStr,
         branch: branch,
         shift: shift,
         data: data
+      }).catch(err => {
+        console.warn("Direct checklist save failed, queuing via Sync:", err);
+        if (typeof Sync !== "undefined" && Sync.enqueue) {
+          Sync.enqueue("chk:" + branch + ":" + dateStr + ":" + shift, "saveChecklist", { date: dateStr, branch, shift, data });
+        }
       });
+    } else if (typeof Sync !== "undefined" && Sync.enqueue) {
+      Sync.enqueue("chk:" + branch + ":" + dateStr + ":" + shift, "saveChecklist", { date: dateStr, branch, shift, data });
     }
     return data;
   }
@@ -96,7 +103,7 @@ const Checklist = (() => {
 let currentChecklistDate = new Date().toISOString().split("T")[0];
 let currentChecklistShift = "morning";
 
-function renderChecklistView() {
+async function renderChecklistView() {
   const container = document.getElementById("checklistView");
   if (!container) return;
 
@@ -104,6 +111,22 @@ function renderChecklistView() {
   const dateInput = document.getElementById("checklistDateInput");
   if (dateInput) {
     dateInput.value = currentChecklistDate;
+  }
+
+  // مزامنة سحابية إذا متوفرة لضمان عرض بيانات الجوال على اللابتوب والعكس
+  if (typeof Sync !== "undefined" && Sync.get) {
+    try {
+      const remote = await Sync.get("getChecklist", { date: currentChecklistDate, branch }, "checklist:" + currentChecklistDate + ":" + branch);
+      if (remote && remote[currentChecklistShift]) {
+        const key = Checklist.getKey(currentChecklistDate, branch, currentChecklistShift);
+        const local = Checklist.loadData(currentChecklistDate, branch, currentChecklistShift);
+        if (!local.updatedAt || (remote[currentChecklistShift].updatedAt && new Date(remote[currentChecklistShift].updatedAt) >= new Date(local.updatedAt))) {
+          localStorage.setItem(key, JSON.stringify(remote[currentChecklistShift]));
+        }
+      }
+    } catch (e) {
+      console.warn("Could not sync remote checklist:", e);
+    }
   }
 
   const data = Checklist.loadData(currentChecklistDate, branch, currentChecklistShift);
