@@ -251,7 +251,77 @@ async function getAllPhotos(branchFilter, dateFilter) {
   if (bFilter) photos = photos.filter(p => !p.branch || p.branch === bFilter);
   if (dFilter) photos = photos.filter(p => !p.date || p.date === dFilter);
 
+  // مزامنة تلقائية بالخلفية: إذا كان هناك صور ملتقطة سابقاً على هذا الجهاز ولم ترفع لسوبابيس، ارفعها الآن
+  if (localPhotos.length > 0 && typeof SupaEngine !== "undefined" && SupaEngine.saveInspectionPhoto) {
+    syncPendingLocalPhotos(localPhotos).catch(() => {});
+  }
+
   return photos.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+}
+
+let isSyncingLocalPhotos = false;
+async function syncPendingLocalPhotos(localList) {
+  if (isSyncingLocalPhotos) return;
+  if (typeof SupaEngine === "undefined" || !SupaEngine.saveInspectionPhoto) return;
+  isSyncingLocalPhotos = true;
+  try {
+    let list = localList;
+    if (!list) {
+      const db = await openMediaDatabase();
+      if (db) {
+        list = await new Promise((resolve) => {
+          const tx = db.transaction("photos", "readonly");
+          const req = tx.objectStore("photos").getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => resolve([]);
+        });
+      } else {
+        list = JSON.parse(localStorage.getItem("ph_local_photos") || "[]");
+      }
+    }
+
+    if (!list || list.length === 0) return;
+
+    // تجميع حسب الفرع والتاريخ
+    const groups = {};
+    list.forEach(p => {
+      const b = p.branch || (typeof Branch !== "undefined" ? Branch.get() : "") || "عبداللطيف جميل";
+      const d = p.date || todayStr();
+      const key = `${d}:::${b}`;
+      if (!groups[key]) groups[key] = { date: d, branch: b, photos: [] };
+      groups[key].photos.push(p);
+    });
+
+    for (const key of Object.keys(groups)) {
+      const g = groups[key];
+      const remote = await SupaEngine.getInspectionPhotos(g.date, g.branch);
+      const remoteIds = new Set((remote || []).map(rp => rp.id));
+
+      for (const lp of g.photos) {
+        if (!remoteIds.has(lp.id)) {
+          console.log("رفع صورة محلية سابقة إلى السحابة:", lp.id, lp.checkpointName);
+          await SupaEngine.saveInspectionPhoto(lp);
+          remoteIds.add(lp.id);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("syncPendingLocalPhotos error:", e);
+  } finally {
+    isSyncingLocalPhotos = false;
+  }
+}
+
+async function manualSyncLocalPhotos() {
+  showToast("⏳ جاري فحص ومزامنة صور هذا الجهاز مع السحابة…");
+  await syncPendingLocalPhotos();
+  showToast("✅ تمت مزامنة جميع صور الجهاز مع السحابة بنجاح!");
+  if (typeof renderOpeningView === "function" && document.getElementById("openingView") && !document.getElementById("openingView").classList.contains("hidden")) {
+    renderOpeningView();
+  }
+  if (typeof renderInspectionGalleryView === "function" && document.getElementById("inspectionView") && !document.getElementById("inspectionView").classList.contains("hidden")) {
+    renderInspectionGalleryView();
+  }
 }
 
 // ---- تجربة التصوير الميداني بالكاميرا الحية ----
@@ -467,7 +537,10 @@ async function renderInspectionGalleryView() {
           <h2>📷 المعاينة الميدانية وسجل الصور التشغيلية</h2>
           <div class="sub-text">التوثيق البصري المباشر لافتتاح وإغلاق فرع ${branch}</div>
         </div>
-        <div class="branch-selector-wrap">
+        <div class="branch-selector-wrap" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button class="btn gold" onclick="manualSyncLocalPhotos()" title="رفع أي صور تم التقاطها بهذا الجهاز سابقاً إلى السحابة لتظهر على اللابتوب" style="font-size:12px;padding:6px 12px;">
+            ☁️ رفع صور هذا الجهاز للسحابة
+          </button>
           <select onchange="onInspectionBranchChange(this.value)">
             ${branchOptionsHtml(branch)}
           </select>
