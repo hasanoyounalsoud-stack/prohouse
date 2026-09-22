@@ -2501,6 +2501,40 @@ table.order-table td.total-cell{ font-weight:900; background:#FFF4D6; }
   background: #CFD8DC;
 }
 
+.rem-btn-sauce-toggle {
+  height: 36px;
+  padding: 0 10px;
+  background: #FFFFFF;
+  border: 1.5px solid var(--black);
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #374151;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.rem-btn-sauce-toggle:hover {
+  background: #F3F4F6;
+}
+
+.rem-btn-sauce-toggle:active {
+  transform: scale(0.95);
+}
+
+.rem-btn-sauce-toggle.active {
+  background: #FEF3C7;
+  border-color: #D97706;
+  color: #92400E;
+  font-weight: 900;
+  box-shadow: 0 0 0 1px #D97706;
+}
+
 .rem-inline-actions {
   display: inline-flex;
   align-items: center;

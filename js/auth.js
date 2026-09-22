@@ -164,10 +164,19 @@ const Auth = (() => {
   function canSeeFinancials() { return role() === "owner"; }
   function canManageItems() { return role() === "owner"; }
   function canManageSettings() { return role() === "owner"; }
+  function canSeeSales() {
+    const e = getEmployee();
+    if (!e) return false;
+    if (e.role === "owner") return true;
+    if (e.id === "emp_1" || e.id === "emp_2") return true;
+    if (e.name && (e.name.includes("يزيد") || e.name.includes("حسن"))) return true;
+    return false;
+  }
 
   return {
     getToken, getEmployee, isLoggedIn, login, logout, changePin, verify, clearSessionAndReload,
     role, branches, isOwner, isBranchStaff, canSeeAllBranches, canEditBranch,
-    isViewOnlyEntry, isViewOnlyTomorrow, canSeeReports, canSeeFinancials, canManageItems, canManageSettings
+    isViewOnlyEntry, isViewOnlyTomorrow, canSeeReports, canSeeFinancials, canManageItems, canManageSettings,
+    canSeeSales
   };
 })();
