@@ -67,8 +67,9 @@ function getTargetDates() {
   const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(today.getDate() - 1);
+  const sunday = new Date("2026-09-20T12:00:00");
 
-  return [formatDateObj(yesterday), formatDateObj(today)];
+  return [formatDateObj(sunday), formatDateObj(yesterday), formatDateObj(today)];
 }
 
 function normalizeArabic(s) {
