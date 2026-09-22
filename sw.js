@@ -1,7 +1,7 @@
 // Service Worker: Pro House Operations Center v4.3.5
 // يخزّن هيكل التطبيق (HTML/CSS/JS) محلياً لدعم العمل أوفلاين التام للموظفين والفروع.
 
-const CACHE_NAME = "prohouse-shell-v4.8.8";
+const CACHE_NAME = "prohouse-shell-v4.8.9";
 
 // التخزين المسبق ضروري: بدونه أول فتحة بدون نت بتفشل كلياً لأنه ما في شي مخزّن أصلاً.
 // أي ملف جديد ينضاف لـ index.html لازم ينضاف هون كمان، وإلا التطبيق بينكسر أوفلاين بس.
@@ -9,6 +9,11 @@ const SHELL_FILES = [
   "./",
   "./index.html",
   "./manifest.json",
+  "./assets/logo.png",
+  "./assets/icon-192.png",
+  "./assets/icon-512.png",
+  "./assets/icon-maskable-512.png",
+  "./assets/apple-touch-icon.png",
   "./css/style.css",
   "./js/config.js",
   "./js/supabase-engine.js",

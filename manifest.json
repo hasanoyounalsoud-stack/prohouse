@@ -1,11 +1,29 @@
 {
-  "name": "Pro House — استلام وإرجاع الأصناف",
-  "short_name": "Pro House",
+  "name": "برو هاوس اوبريشن",
+  "short_name": "برو هاوس اوبريشن",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#FFFFFF",
   "theme_color": "#F7DC4E",
   "lang": "ar",
-  "dir": "rtl"
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
 }
