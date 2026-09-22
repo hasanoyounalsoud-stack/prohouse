@@ -694,20 +694,31 @@ async function saveRemainingReportData() {
   };
 
   Sync.cacheSet("remaining:" + currentRemainingDate + ":" + currentRemainingBranch, payload);
-  Sync.enqueue("saveRemainingReport:" + currentRemainingDate + ":" + currentRemainingBranch, "saveRemainingReport", payload);
-
-  showToast("✅ تم حفظ تقرير المتبقي والجرد بنجاح!");
 
   const statusEl = document.getElementById("remainingSaveStatus");
-  if (statusEl) {
-    statusEl.textContent = "تم حفظ تقرير المتبقي بنجاح (" + new Date().toLocaleTimeString("ar-SA") + ")";
-    statusEl.classList.remove("dirty");
+
+  try {
+    // محاولة المزامنة الفورية السريعة مع Supabase
+    await Sync.postOnce("saveRemainingReport", payload);
+    showToast("✅ تم رفع تقرير المتبقي ومزامنته سحابياً بنجاح!");
+    if (statusEl) {
+      statusEl.textContent = "✅ متزامن سحابياً مع كل الأجهزة (" + new Date().toLocaleTimeString("ar-SA") + ")";
+      statusEl.classList.remove("dirty");
+    }
+  } catch (err) {
+    console.warn("Direct saveRemainingReport sync failed, keeping in queue:", err);
+    Sync.enqueue("saveRemainingReport:" + currentRemainingDate + ":" + currentRemainingBranch, "saveRemainingReport", payload);
+    showToast("💾 تم الحفظ محلياً وهو في طابور المزامنة السحابية");
+    if (statusEl) {
+      statusEl.textContent = "⏳ محفوظ محلياً — قيد الرفع السحابي (" + (err.message || "بانتظار المزامنة") + ")";
+      statusEl.classList.add("dirty");
+    }
   }
 
   setTimeout(() => {
     isRemainingSaving = false;
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "💾 حفظ تقرير المتبقي"; }
-  }, 1000);
+  }, 800);
 }
 
 async function closeOperationalDay() {

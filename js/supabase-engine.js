@@ -185,6 +185,43 @@ const SupaEngine = (() => {
     return { id: payload.id };
   }
 
+  // ضمان وجود كل الأصناف في جدول items لتفادي رفض الحفظ بسبب قيود المفتاح الأجنبي (Foreign Key)
+  async function ensureItemsExist(items, branch) {
+    if (!items || !items.length) return;
+    try {
+      const dbItems = await query("items?select=id");
+      const existingIds = new Set((dbItems || []).map(i => i.id));
+      const missing = [];
+      const seen = new Set();
+      items.forEach(it => {
+        const id = it.itemId || it.id;
+        if (!id || existingIds.has(id) || seen.has(id)) return;
+        seen.add(id);
+        missing.push({
+          id: id,
+          category: it.category || "عام",
+          name: it.itemName || it.name || id,
+          unit: it.unit || "جرام",
+          has_custom_name: true,
+          branches: branch || "",
+          active: true,
+          sort_order: 99,
+          updated_at: new Date().toISOString()
+        });
+      });
+
+      if (missing.length > 0) {
+        await query("items", {
+          method: "POST",
+          headers: { "Prefer": "resolution=merge-duplicates" },
+          body: JSON.stringify(missing)
+        });
+      }
+    } catch (e) {
+      console.warn("ensureItemsExist note:", e.message || e);
+    }
+  }
+
   // --- مخطّطات مشتركة بين القراءات ---
   function mapEntry(e) {
     return {
@@ -253,6 +290,7 @@ const SupaEngine = (() => {
     }
 
     if (items && items.length) {
+      await ensureItemsExist(items, branch);
       const rows = items.map(it => ({
         date,
         branch,
@@ -284,6 +322,7 @@ const SupaEngine = (() => {
   async function saveRemainingReport(payload) {
     const { date, branch, items } = payload;
     if (items && items.length) {
+      await ensureItemsExist(items, branch);
       const rows = items.map(it => ({
         date,
         branch,
@@ -329,6 +368,7 @@ const SupaEngine = (() => {
     await query(`tomorrow_orders?date=eq.${date}&branch=eq.${encodeURIComponent(branch)}`, { method: "DELETE" });
 
     if (items && items.length) {
+      await ensureItemsExist(items, branch);
       const rows = items.map(it => ({
         date,
         branch,

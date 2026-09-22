@@ -751,18 +751,30 @@ async function saveReceivingReportData() {
     items: itemsPayload,
     removedItemIds: Array.from(currentReceivingRemovedIds)
   });
-  Sync.enqueue("saveDay:" + currentReceivingDate + ":" + currentReceivingBranch, "saveDay", payload);
-
-  showToast("✅ تم حفظ تقرير الاستلام بنجاح!");
 
   const statusEl = document.getElementById("receivingSaveStatus");
-  if (statusEl) {
-    statusEl.textContent = "تم حفظ تقرير الاستلام بنجاح (" + new Date().toLocaleTimeString("ar-SA") + ")";
-    statusEl.classList.remove("dirty");
+
+  try {
+    // محاولة المزامنة الفورية السريعة مع Supabase
+    await Sync.postOnce("saveDay", payload);
+    showToast("✅ تم رفع تقرير الاستلام ومزامنته سحابياً بنجاح!");
+    if (statusEl) {
+      statusEl.textContent = "✅ متزامن سحابياً مع كل الأجهزة (" + new Date().toLocaleTimeString("ar-SA") + ")";
+      statusEl.classList.remove("dirty");
+    }
+  } catch (err) {
+    console.warn("Direct saveDay sync failed, keeping in queue:", err);
+    // إيداع في طابور المزامنة التلقائي لإعادة المحاولة في الخلفية
+    Sync.enqueue("saveDay:" + currentReceivingDate + ":" + currentReceivingBranch, "saveDay", payload);
+    showToast("💾 تم الحفظ محلياً وهو في طابور المزامنة السحابية");
+    if (statusEl) {
+      statusEl.textContent = "⏳ محفوظ محلياً — قيد الرفع السحابي (" + (err.message || "بانتظار المزامنة") + ")";
+      statusEl.classList.add("dirty");
+    }
   }
 
   setTimeout(() => {
     isReceivingSaving = false;
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "💾 حفظ تقرير الاستلام"; }
-  }, 1000);
+  }, 800);
 }

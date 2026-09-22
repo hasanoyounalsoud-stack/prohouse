@@ -76,11 +76,13 @@ function normalizeArabic(s) {
   return String(s || "").replace(/[إأآ]/g, "ا").trim();
 }
 
-// إرسال لـ Supabase (اختياري): إذا كانت مفاتيح supabaseUrl/supabaseToken موجودة
-// بـ config.json بينبعث الملف نفسه للنظام الجديد كمان — الشيت بيضل يتحدث عادي.
-async function sendToSupabase(rpcName, iso, branch, rows) {
-  if (!config.supabaseUrl || !config.supabaseToken) return false;
-  const url = String(config.supabaseUrl).replace(/\/$/, "") + "/rest/v1/rpc/" + rpcName;
+// إرسال لـ Supabase: إذا كانت مفاتيح supabaseUrl/supabaseToken موجودة
+// بـ config.json بينبعث الملف نفسه للنظام الجديد كمان
+async function sendToSupabase(rpcName, iso, branch, rows, customUrl, customToken) {
+  const finalUrl = customUrl || config.supabaseUrl;
+  const finalToken = customToken || config.supabaseToken;
+  if (!finalUrl || !finalToken) return false;
+  const url = String(finalUrl).replace(/\/$/, "") + "/rest/v1/rpc/" + rpcName;
   const anonKey = config.supabaseAnonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNhZHRpbmZkd3Vjd3J4bG13eG92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NTM4MDgsImV4cCI6MjEwNTEyOTgwOH0.jMtjOIBQIuv0N0Q4ms9LJ5ys3h3lfakND4pVQXNbU2w";
   const res = await fetch(url, {
     method: "POST",
@@ -89,7 +91,7 @@ async function sendToSupabase(rpcName, iso, branch, rows) {
       "apikey": anonKey,
       "Authorization": "Bearer " + anonKey
     },
-    body: JSON.stringify({ p_token: config.supabaseToken, p_date: iso, p_branch: branch, p_rows: rows })
+    body: JSON.stringify({ p_token: finalToken, p_date: iso, p_branch: branch, p_rows: rows })
   });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
@@ -316,13 +318,17 @@ async function run() {
           console.warn("⚠ تعذر إرسال مبيعات التصنيفات إلى API:", fetchErr.message);
         }
 
-        // نفس البيانات للنظام الجديد (Supabase) إذا كان مربوطاً
-        if (config.supabaseUrl && config.supabaseToken) {
+        // نفس البيانات للنظام الجديد (Supabase)
+        const supaUrl = config.supabaseUrl || "https://sadtinfdwucwrxlmwxov.supabase.co";
+        const supaToken = config.supabaseToken || "83354f8b8614b5aa649f1828e05da526b42a69ac9d97ad36";
+        const targetBranches = config.allBranches ? ["الروضة", "الشاطئ", "عبداللطيف جميل"] : [config.branch || "عبداللطيف جميل"];
+
+        for (const b of targetBranches) {
           try {
-            await sendToSupabase("import_sales", iso, config.branch, mappedRows);
-            console.log("☁️ تم تحديث مبيعات التصنيفات على Supabase أيضاً.");
+            await sendToSupabase("import_sales", iso, b, mappedRows, supaUrl, supaToken);
+            console.log(`☁️ تم تحديث مبيعات التصنيفات على Supabase لفرع ${b}.`);
           } catch (supaErr) {
-            console.warn("⚠ تعذر تحديث Supabase (مبيعات التصنيفات):", supaErr.message);
+            console.warn(`⚠ تعذر تحديث Supabase (مبيعات التصنيفات لفرع ${b}):`, supaErr.message);
           }
         }
       }
@@ -348,12 +354,16 @@ async function run() {
           console.warn("⚠ خطأ شبكة أثناء إرسال مبيعات العصيرات:", jErr.message);
         }
 
-        if (config.supabaseUrl && config.supabaseToken) {
+        const supaUrl = config.supabaseUrl || "https://sadtinfdwucwrxlmwxov.supabase.co";
+        const supaToken = config.supabaseToken || "83354f8b8614b5aa649f1828e05da526b42a69ac9d97ad36";
+        const targetBranches = config.allBranches ? ["الروضة", "الشاطئ", "عبداللطيف جميل"] : [config.branch || "عبداللطيف جميل"];
+
+        for (const b of targetBranches) {
           try {
-            await sendToSupabase("import_juice_sales", iso, config.branch, juiceRows);
-            console.log("☁️ تم تحديث مبيعات العصيرات على Supabase أيضاً.");
+            await sendToSupabase("import_juice_sales", iso, b, juiceRows, supaUrl, supaToken);
+            console.log(`☁️ تم تحديث مبيعات العصيرات على Supabase لفرع ${b}.`);
           } catch (supaErr) {
-            console.warn("⚠ تعذر تحديث Supabase (مبيعات العصيرات):", supaErr.message);
+            console.warn(`⚠ تعذر تحديث Supabase (مبيعات العصيرات لفرع ${b}):`, supaErr.message);
           }
         }
       } else {

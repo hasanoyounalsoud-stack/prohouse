@@ -308,5 +308,5 @@ const Sync = (() => {
   window.addEventListener("online", flushQueue);
   setInterval(flushQueue, 45000);
 
-  return { get, call, enqueue, flushQueue, getQueue, cacheGet, cacheSet, clearReadCache, onStatusChange, emitStatus, getLastReadError: () => lastReadError };
+  return { get, call, postOnce, enqueue, flushQueue, getQueue, cacheGet, cacheSet, clearReadCache, onStatusChange, emitStatus, getLastReadError: () => lastReadError };
 })();
