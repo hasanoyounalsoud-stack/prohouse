@@ -494,15 +494,54 @@ function renderRemainingView(receivingData, salesData) {
     }
     if (catBadge.level === "critical") highVarianceCount++;
 
+    const catSafeId = cssId(cat);
+    const recMeals = isMealCat ? (catReceivedSum / MEAL_WEIGHT_G).toFixed(1).replace(/\.0$/, "") : null;
+    const soldMeals = isMealCat ? categorySoldMeals : null;
+    const remMeals = isMealCat ? (catActualRemainingSum / MEAL_WEIGHT_G).toFixed(1).replace(/\.0$/, "") : null;
+    const varMeals = isMealCat ? (catVarianceGrams / MEAL_WEIGHT_G).toFixed(1).replace(/\.0$/, "") : null;
+    const hasRemainingRecorded = filledCount > 0;
+
+    let varBadgeHtml = "";
+    if (hasRemainingRecorded) {
+      if (Math.abs(catVarianceGrams) <= 50) {
+        varBadgeHtml = `<span class="cat-pill pill-ok">✅ مطابق</span>`;
+      } else if (catVarianceGrams < 0) {
+        varBadgeHtml = `<span class="cat-pill pill-danger">🔻 عجز: ${isMealCat ? `${Math.abs(varMeals)} وجبة` : `${Math.abs(Math.round(catVarianceGrams))} جم`}</span>`;
+      } else {
+        varBadgeHtml = `<span class="cat-pill pill-warn">🔺 زيادة: +${isMealCat ? `${varMeals} وجبة` : `${Math.round(catVarianceGrams)} جم`}</span>`;
+      }
+    } else {
+      varBadgeHtml = `<span class="cat-pill pill-pending">⏳ بانتظار الجرد</span>`;
+    }
+
     html += `
       <div class="category-section category-section-rem${remainingCollapsed[cat] ? " collapsed" : ""}" data-cat="${cat}">
         <div class="category-header" onclick="toggleRemainingCategory('${String(cat).replace(/'/g, "\\'")}')">
-          <div class="cat-label">
-            <span>${categoryIconSticker(cat)} ${cat}</span>
-            ${isMealCat && !Auth.isBranchStaff() ? `<span class="badge ${catBadge.class}" style="font-size:11px;margin-right:6px;">${catBadge.label}</span>` : ''}
+          <div class="cat-header-main">
+            <div class="cat-label">
+              <span class="cat-title">${categoryIconSticker(cat)} ${cat}</span>
+              ${isMealCat && !Auth.isBranchStaff() ? `<span class="badge ${catBadge.class}" style="font-size:11px;margin-right:6px;">${catBadge.label}</span>` : ''}
+            </div>
+
+            <!-- شريط مؤشرات التصنيف: المستلم، المباع، المتبقي، العجز -->
+            <div class="cat-metrics-bar" id="cat-metrics-${catSafeId}" onclick="event.stopPropagation()">
+              <span class="cat-pill pill-rec" title="إجمالي الكمية المستلمة صباحاً">
+                📥 مستلم: <b>${isMealCat ? `${recMeals} وجبة` : `${Math.round(catReceivedSum)} جم`}</b>
+              </span>
+              <span class="cat-pill pill-sold" title="إجمالي المبيعات المسحوبة من تابسنس">
+                💳 مباع: <b>${isMealCat ? `${soldMeals || 0} وجبة` : '—'}</b>
+              </span>
+              <span class="cat-pill pill-rem" id="cat-pill-rem-${catSafeId}" title="إجمالي المتبقي الفعلي المسجل">
+                🍗 متبقي: <b>${hasRemainingRecorded ? (isMealCat ? `${remMeals} وجبة` : `${Math.round(catActualRemainingSum)} جم`) : '—'}</b>
+              </span>
+              <span id="cat-pill-var-${catSafeId}">
+                ${varBadgeHtml}
+              </span>
+            </div>
           </div>
+
           <span class="cat-count-badge">
-            <span class="cat-count">${filledCount}/${catItems.length}</span>
+            <span class="cat-count" id="cat-count-${catSafeId}">${filledCount}/${catItems.length}</span>
             <span class="chevron">▾</span>
           </span>
         </div>
@@ -520,6 +559,76 @@ function renderRemainingView(receivingData, salesData) {
 
   view.innerHTML = html;
   filterRemainingCardsUI();
+}
+
+function updateCategoryHeaderMetrics(itemId) {
+  const items = getAllRemainingActiveItems(cachedReceivingDataForRemaining);
+  const targetItem = items.find(it => it.id === itemId);
+  if (!targetItem) return;
+  const cat = targetItem.category || "عام";
+  const catSafeId = cssId(cat);
+
+  const catItems = items.filter(it => (it.category || "عام") === cat);
+  const isMealCat = isMealMatchingCategory(cat);
+
+  const salesMap = {};
+  if (cachedSalesDataForRemaining && Array.isArray(cachedSalesDataForRemaining)) {
+    cachedSalesDataForRemaining.forEach(r => {
+      salesMap[r.category] = (salesMap[r.category] || 0) + Number(r.qty || 0);
+    });
+  }
+  const categorySoldMeals = isMealCat ? getMatchedCategorySales(salesMap, cat) : 0;
+  const categoryConsumedGrams = categorySoldMeals * MEAL_WEIGHT_G;
+
+  const receivingMap = {};
+  if (cachedReceivingDataForRemaining && cachedReceivingDataForRemaining.items) {
+    cachedReceivingDataForRemaining.items.forEach(it => { receivingMap[it.itemId] = it; });
+  }
+
+  let catReceivedSum = 0;
+  let catActualRemainingSum = 0;
+  let filledCount = 0;
+
+  catItems.forEach(it => {
+    const recEntry = receivingMap[it.id] || {};
+    catReceivedSum += Number(recEntry.received || 0);
+
+    const remData = currentRemainingData[it.id] || {};
+    const val = remData.remainingWeight || remData.remaining;
+    if (val !== "" && val !== null && val !== undefined) {
+      filledCount++;
+    }
+    catActualRemainingSum += Number(val || 0);
+  });
+
+  const countEl = document.getElementById("cat-count-" + catSafeId);
+  if (countEl) countEl.textContent = `${filledCount}/${catItems.length}`;
+
+  const remPill = document.getElementById("cat-pill-rem-" + catSafeId);
+  const hasRemainingRecorded = filledCount > 0;
+  const remMeals = isMealCat ? (catActualRemainingSum / MEAL_WEIGHT_G).toFixed(1).replace(/\.0$/, "") : null;
+  if (remPill) {
+    remPill.innerHTML = `🍗 متبقي: <b>${hasRemainingRecorded ? (isMealCat ? `${remMeals} وجبة` : `${Math.round(catActualRemainingSum)} جم`) : '—'}</b>`;
+  }
+
+  const varPillContainer = document.getElementById("cat-pill-var-" + catSafeId);
+  if (varPillContainer) {
+    const expectedRemainingGrams = isMealCat ? Math.max(0, catReceivedSum - categoryConsumedGrams) : catReceivedSum;
+    const catVarianceGrams = catActualRemainingSum - expectedRemainingGrams;
+    const varMeals = isMealCat ? (catVarianceGrams / MEAL_WEIGHT_G).toFixed(1).replace(/\.0$/, "") : null;
+
+    if (hasRemainingRecorded) {
+      if (Math.abs(catVarianceGrams) <= 50) {
+        varPillContainer.innerHTML = `<span class="cat-pill pill-ok">✅ مطابق</span>`;
+      } else if (catVarianceGrams < 0) {
+        varPillContainer.innerHTML = `<span class="cat-pill pill-danger">🔻 عجز: ${isMealCat ? `${Math.abs(varMeals)} وجبة` : `${Math.abs(Math.round(catVarianceGrams))} جم`}</span>`;
+      } else {
+        varPillContainer.innerHTML = `<span class="cat-pill pill-warn">🔺 زيادة: +${isMealCat ? `${varMeals} وجبة` : `${Math.round(catVarianceGrams)} جم`}</span>`;
+      }
+    } else {
+      varPillContainer.innerHTML = `<span class="cat-pill pill-pending">⏳ بانتظار الجرد</span>`;
+    }
+  }
 }
 
 function toggleRemainingCategory(cat) {
@@ -573,6 +682,8 @@ function onRemainingWeightChange(itemId, val) {
     const num = Number(val || 0);
     mealEl.textContent = num > 0 ? `🍽 ${mealsCount(num)} وجبة` : '0 وجبة';
   }
+
+  updateCategoryHeaderMetrics(itemId);
 
   saveRemainingLocalDebounced();
   updateSaveBarRemainingStatus();

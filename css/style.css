@@ -2538,3 +2538,80 @@ table.order-table td.total-cell{ font-weight:900; background:#FFF4D6; }
 .rem-note-drawer.expanded {
   display: block;
 }
+
+/* --- مؤشرات تصنيف الجرد بشريط الفئة (مستلم، مباع، متبقي، عجز) --- */
+.cat-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.cat-metrics-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.cat-pill b {
+  font-weight: 900;
+}
+
+.cat-pill.pill-rec {
+  background: #E3F2FD;
+  color: #0D47A1;
+  border-color: #90CAF9;
+}
+
+.cat-pill.pill-sold {
+  background: #EDE7F6;
+  color: #4A148C;
+  border-color: #B39DDB;
+}
+
+.cat-pill.pill-rem {
+  background: #E8F5E9;
+  color: #1B5E20;
+  border-color: #A5D6A7;
+}
+
+.cat-pill.pill-ok {
+  background: #E8F5E9;
+  color: #2E7D32;
+  border-color: #81C784;
+}
+
+.cat-pill.pill-danger {
+  background: #FFEBEE;
+  color: #C62828;
+  border-color: #EF9A9A;
+  font-weight: 900;
+}
+
+.cat-pill.pill-warn {
+  background: #FFF8E1;
+  color: #F57F17;
+  border-color: #FFE082;
+}
+
+.cat-pill.pill-pending {
+  background: #ECEFF1;
+  color: #546E7A;
+  border-color: #CFD8DC;
+  font-style: italic;
+}
+
