@@ -303,7 +303,11 @@ function renderReceivingView() {
       if (status === "زائد") badgeClass = "surplus";
       if (status === "لم يصل") badgeClass = "neutral";
 
-      const isMeal = isMealCategory(it.category);
+      const catStr = String(it.category || "");
+      const isSandwich = catStr.includes("فطور") || catStr.includes("ساندويتش") || catStr.includes("ساندوتش");
+      const isSalad = catStr.includes("سلط");
+      const isWeightMeal = catStr.includes("دجاج") || catStr.includes("لحم") || catStr.includes("بحري") || catStr.includes("سمك") || catStr.includes("أسماك");
+      const isMeal = isWeightMeal || isSandwich || isSalad;
       const notesExpanded = receivingNotesExpanded[it.id] || !!recData.notes;
 
       html += `
@@ -312,13 +316,15 @@ function renderReceivingView() {
           <div class="rec-card-header">
             <div class="rec-item-header-main">
               <span class="rec-item-name">${it.name}</span>
-              <span class="rec-item-unit">(${it.unit || "جم"})</span>
+              <span class="rec-item-unit">(${isSandwich ? "ساندويتش" : (isSalad ? "حبة" : (it.unit || "جم"))})</span>
               ${it.isCustom ? '<span class="badge ok rec-custom-badge">إضافي</span>' : ''}
               <span class="rec-meta-chip rec-req-chip" title="المطلوب من المطبخ">📋 طلب: <strong>${ord !== "" ? ord : "—"}</strong></span>
               <span class="rec-meta-chip rec-diff-chip ${diff < 0 ? 'diff-red' : (diff > 0 ? 'diff-orange' : (diff === 0 ? 'diff-green' : 'diff-gray'))}" id="recdiff-${it.id}">
                 ${diff === null ? '—' : (diff === 0 ? '✅ مطابق' : (diff < 0 ? `🔻 ${diff}` : `🔺 +${diff}`))}
               </span>
-              ${isMeal ? `<span class="rec-meta-chip rec-meal-chip" id="recmeals-${it.id}">🍽 ${mealsCount(rec) || "0"} وجبة</span>` : ""}
+              ${isSandwich ? `<span class="rec-meta-chip rec-meal-chip" id="recmeals-${it.id}">🥪 ${recNum ? Math.round(recNum) : "0"} ساندويتش</span>` :
+                (isSalad ? `<span class="rec-meta-chip rec-meal-chip" id="recmeals-${it.id}">🥗 ${recNum ? Math.round(recNum) : "0"} حبة</span>` :
+                (isWeightMeal ? `<span class="rec-meta-chip rec-meal-chip" id="recmeals-${it.id}">🍽 ${mealsCount(rec) || "0"} وجبة</span>` : ""))}
             </div>
             <div class="rec-item-header-actions">
               <span class="badge ${badgeClass}">${status}</span>
@@ -336,7 +342,7 @@ function renderReceivingView() {
                      id="recinput-${it.id}"
                      oninput="onReceivingInputChange('${it.id}', this.value)"
                      class="rec-main-input ${diff < 0 ? 'border-red' : (diff > 0 ? 'border-orange' : (hasValue ? 'border-green' : ''))}">
-              <span class="rec-input-unit-label">${it.unit || "جم"}</span>
+              <span class="rec-input-unit-label">${isSandwich ? "ساندويتش" : (isSalad ? "حبة" : (it.unit || "جم"))}</span>
             </div>
 
             <!-- أزرار الإجراء السريع بلمسة واحدة -->
@@ -514,7 +520,17 @@ function updateReceivingItemCardUI(itemId) {
 
   // تحديث عدد الوجبات
   const mealsEl = document.getElementById("recmeals-" + itemId);
-  if (mealsEl) mealsEl.textContent = "🍽 " + (mealsCount(recVal) || "0") + " وجبة";
+  if (mealsEl) {
+    const it = (Items.current || []).find(x => x.id === itemId);
+    const catStr = String((it && it.category) || (card && card.closest(".category-section")?.dataset.cat) || "");
+    if (catStr.includes("فطور") || catStr.includes("ساندويتش") || catStr.includes("ساندوتش")) {
+      mealsEl.textContent = "🥪 " + (recNum ? Math.round(recNum) : "0") + " ساندويتش";
+    } else if (catStr.includes("سلط")) {
+      mealsEl.textContent = "🥗 " + (recNum ? Math.round(recNum) : "0") + " حبة";
+    } else {
+      mealsEl.textContent = "🍽 " + (mealsCount(recVal) || "0") + " وجبة";
+    }
+  }
   updateReceivingCategoryCount(itemId);
 
   // تحديث الباج

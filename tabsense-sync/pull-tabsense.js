@@ -35,10 +35,14 @@ const CATEGORY_MAP = {
   "الساندويتشات": "ساندويتشات",
   "ساندوتشات": "ساندويتشات",
   "الساندوتشات": "ساندويتشات",
-  "Sandwiches": "ساندويتشات",
   "فطور": "ساندويتشات",
   "الفطور": "ساندويتشات",
-  "Breakfast": "ساندويتشات"
+  "Breakfast": "ساندويتشات",
+  "السلطات": "السلطات",
+  "سلطات": "السلطات",
+  "سلطة": "السلطات",
+  "Salads": "السلطات",
+  "Salad": "السلطات"
 };
 
 const UMM_ALI_PRODUCT_NAME = "ام علي";
@@ -285,6 +289,7 @@ async function run() {
             else if (pCatNorm.includes("لحم") || pNameNorm.includes("لحم") || pNameNorm.includes("meat")) targetCat = "لحم";
             else if (pCatNorm.includes("بحري") || pCatNorm.includes("سمك") || pNameNorm.includes("بحري") || pNameNorm.includes("سمك") || pNameNorm.includes("fish")) targetCat = "بحري";
             else if (pCatNorm.includes("فطور") || pCatNorm.includes("ساندويتش") || pNameNorm.includes("ساندويتش") || pNameNorm.includes("فطور")) targetCat = "ساندويتشات";
+            else if (pCatNorm.includes("سلط") || pNameNorm.includes("سلط") || pNameNorm.includes("salad")) targetCat = "السلطات";
           }
           if (targetCat && p.qty > 0) {
             const hasFromCategoryTable = categoryRows.some(r => CATEGORY_MAP[r.category] === targetCat);

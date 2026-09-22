@@ -406,7 +406,8 @@ async function renderMealsSummary(days) {
     let totalReceivedMeals = 0, totalSoldMeals = 0, allHaveSales = true;
     const rows = relevantCats.map(cat => {
       const rawRec = receivedGramsByCat[cat] || 0;
-      const receivedMeals = (cat === "ساندويتشات") ? Number(rawRec.toFixed(1)) : (Number(mealsCount(rawRec)) || 0);
+      const isSandwichOrSalad = cat.includes("ساندويتش") || cat.includes("فطور") || cat.includes("سلط");
+      const receivedMeals = isSandwichOrSalad ? Number(rawRec.toFixed(1)) : (Number(mealsCount(rawRec)) || 0);
       const hasSales = soldByCat[cat] !== undefined;
       const sold = hasSales ? soldByCat[cat] : 0;
       const remaining = receivedMeals - sold;
