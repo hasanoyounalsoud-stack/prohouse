@@ -479,6 +479,7 @@ function toggleReceivingCategory(cat) {
 function onReceivingBranchChange(branch) {
   Branch.set(branch);
   currentReceivingBranch = branch;
+  if (typeof currentRemainingBranch !== "undefined") currentRemainingBranch = branch;
   loadReceivingData(currentReceivingDate, currentReceivingBranch);
 }
 
@@ -666,35 +667,53 @@ function confirmAddReceivingItem(category) {
 
 // حفظ محلي لحظي ذكي (Auto-Save Debounce) لضمان عدم ضياع أي حرف في الجوال
 let saveLocalTimer = null;
+function flushReceivingSave() {
+  if (saveLocalTimer) {
+    clearTimeout(saveLocalTimer);
+    saveLocalTimer = null;
+  }
+  const allItems = getAllReceivingActiveItems();
+  const itemsPayload = [];
+  allItems.forEach(it => {
+    const data = currentReceivingData[it.id] || { received: "", notes: "" };
+    const ord = currentReceivingOrdered[it.id] || 0;
+    const rec = data.received;
+    itemsPayload.push({
+      itemId: it.id,
+      itemName: it.name,
+      unit: it.unit || "جرام",
+      category: it.category || "عام",
+      isCustom: !!it.isCustom,
+      ordered: ord,
+      received: rec,
+      status: computeReceivingItemStatus(rec, ord),
+      notes: data.notes || "",
+      cookName: data.cookName || ""
+    });
+  });
+
+  const payload = { 
+    date: currentReceivingDate, 
+    branch: currentReceivingBranch, 
+    items: itemsPayload,
+    removedItemIds: Array.from(currentReceivingRemovedIds)
+  };
+  Sync.cacheSet("day:" + currentReceivingDate + ":" + currentReceivingBranch, payload);
+  return payload;
+}
+
+function getActiveReceivingData(date, branch) {
+  if (currentReceivingDate === date && currentReceivingBranch === branch && Object.keys(currentReceivingData).length > 0) {
+    return flushReceivingSave();
+  }
+  const cached = Sync.cacheGet("day:" + date + ":" + branch);
+  return cached ? cached.value : null;
+}
+
 function saveLocalDebounced() {
   clearTimeout(saveLocalTimer);
   saveLocalTimer = setTimeout(() => {
-    const allItems = getAllReceivingActiveItems();
-    const itemsPayload = [];
-    allItems.forEach(it => {
-      const data = currentReceivingData[it.id] || { received: "", notes: "" };
-      const ord = currentReceivingOrdered[it.id] || 0;
-      const rec = data.received;
-      itemsPayload.push({
-        itemId: it.id,
-        itemName: it.name,
-        unit: it.unit || "جرام",
-        category: it.category || "عام",
-        isCustom: !!it.isCustom,
-        ordered: ord,
-        received: rec,
-        status: computeReceivingItemStatus(rec, ord),
-        notes: data.notes || "",
-        cookName: data.cookName || ""
-      });
-    });
-
-    Sync.cacheSet("day:" + currentReceivingDate + ":" + currentReceivingBranch, { 
-      date: currentReceivingDate, 
-      branch: currentReceivingBranch, 
-      items: itemsPayload,
-      removedItemIds: Array.from(currentReceivingRemovedIds)
-    });
+    flushReceivingSave();
   }, 400);
 }
 

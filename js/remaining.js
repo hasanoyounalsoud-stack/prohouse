@@ -38,8 +38,12 @@ function getAllRemainingActiveItems(receivingData) {
           isCustom: true,
           branches: branch
         });
-      } else if (recIt.isCustom) {
-        itemsMap.get(id).isCustom = true;
+      } else {
+        const item = itemsMap.get(id);
+        if (recIt.itemName && recIt.itemName !== item.name) item.name = recIt.itemName;
+        if (recIt.unit && recIt.unit !== item.unit) item.unit = recIt.unit;
+        if (recIt.category && recIt.category !== item.category) item.category = recIt.category;
+        if (recIt.isCustom) item.isCustom = true;
       }
     });
   }
@@ -49,14 +53,117 @@ function getAllRemainingActiveItems(receivingData) {
     if (!itemsMap.has(it.id)) itemsMap.set(it.id, { ...it });
   });
 
-  // 4. استبعاد الأصناف المحذوفة
+  // 4. استبعاد الأصناف المحذوفة في الاستلام أو في المتبقي
+  const recRemoved = new Set((recData && Array.isArray(recData.removedItemIds)) ? recData.removedItemIds : []);
+  const extraIds = new Set(currentRemainingExtraItems.map(it => it.id));
+
   const result = [];
   itemsMap.forEach((item, id) => {
     if (currentRemainingRemovedIds.has(id)) return;
+    if (recRemoved.has(id) && !extraIds.has(id)) return;
     result.push(item);
   });
 
   return result;
+}
+
+function formatRemainingItemChip(actualWeight, actualSauce, isProtein, isSauce) {
+  const w = Number(actualWeight || 0);
+  const s = Number(actualSauce || 0);
+  const meals = w > 0 ? mealsCount(w) : 0;
+
+  if (isProtein) {
+    let txt = `🍽 ${meals} وجبة`;
+    if (s > 0) {
+      txt += ` + 🥣 ${s} صوص`;
+    }
+    return txt;
+  } else if (isSauce || s > 0) {
+    return `🥣 ${s} علبة صوص`;
+  }
+  return w > 0 ? `⚖️ ${Math.round(w)} جم` : '';
+}
+
+function formatCategoryRemainingPill(hasRecorded, remMeals, remWeightGrams, sauceCount, isMealCat) {
+  if (!hasRecorded) return `🍗 متبقي: <b>—</b>`;
+
+  if (isMealCat) {
+    let html = `🍗 متبقي: <b>${remMeals} وجبة</b>`;
+    if (sauceCount > 0) {
+      html += ` + 🥣 <b>${sauceCount} صوص</b>`;
+    }
+    return html;
+  } else {
+    if (sauceCount > 0) {
+      let html = `🥣 متبقي: <b>${sauceCount} علبة صوص</b>`;
+      if (remWeightGrams > 0) {
+        html += ` (${Math.round(remWeightGrams)} جم)`;
+      }
+      return html;
+    }
+    return `🍗 متبقي: <b>${Math.round(remWeightGrams)} جم</b>`;
+  }
+}
+
+function updateItemRemainingDisplay(itemId) {
+  const remData = currentRemainingData[itemId] || {};
+  const actualWeight = Number(remData.remainingWeight || remData.remaining || 0);
+  const actualSauce = Number(remData.remainingSauce || 0);
+
+  const card = document.querySelector(`.remaining-card-mobile[data-item-id="${itemId}"]`);
+  const isProtein = card ? card.dataset.isprotein === "true" : true;
+  const isSauce = card ? card.dataset.hassauce === "true" : false;
+
+  const mealEl = document.getElementById("remmeals-" + itemId);
+  if (mealEl) {
+    const text = formatRemainingItemChip(actualWeight, actualSauce, isProtein, isSauce);
+    mealEl.textContent = text;
+    mealEl.style.display = (isProtein || isSauce || actualSauce > 0) ? "" : "none";
+  }
+}
+
+function mergeFreshRemainingData(freshRem) {
+  if (!freshRem) return;
+  if (freshRem.meta) currentRemainingMeta = freshRem.meta;
+  if (Array.isArray(freshRem.removedItemIds)) {
+    freshRem.removedItemIds.forEach(id => currentRemainingRemovedIds.add(id));
+  }
+  (freshRem.items || []).forEach(it => {
+    const existing = currentRemainingData[it.itemId];
+    const userHasLocalWeight = existing && existing.remainingWeight !== "" && existing.remainingWeight !== null && existing.remainingWeight !== undefined;
+    const userHasLocalSauce = existing && existing.remainingSauce !== "" && existing.remainingSauce !== null && existing.remainingSauce !== undefined;
+    const userHasLocalNotes = existing && existing.notes;
+
+    if (!existing) {
+      currentRemainingData[it.itemId] = {
+        remaining: it.remaining !== undefined && it.remaining !== null ? String(it.remaining) : "",
+        remainingWeight: it.remainingWeight !== undefined && it.remainingWeight !== null ? String(it.remainingWeight) : "",
+        remainingSauce: it.remainingSauce !== undefined && it.remainingSauce !== null ? String(it.remainingSauce) : "",
+        notes: it.notes || ""
+      };
+    } else {
+      if (!userHasLocalWeight && it.remainingWeight !== undefined && it.remainingWeight !== null) {
+        existing.remainingWeight = String(it.remainingWeight);
+        existing.remaining = String(it.remaining || it.remainingWeight);
+      }
+      if (!userHasLocalSauce && it.remainingSauce !== undefined && it.remainingSauce !== null) {
+        existing.remainingSauce = String(it.remainingSauce);
+      }
+      if (!userHasLocalNotes && it.notes) {
+        existing.notes = it.notes;
+      }
+    }
+
+    if (!Items.byId(it.itemId) && !currentRemainingExtraItems.some(x => x.id === it.itemId)) {
+      currentRemainingExtraItems.push({
+        id: it.itemId,
+        name: it.itemName || it.name || it.itemId,
+        unit: it.unit || "جرام",
+        category: it.category || "عام",
+        isCustom: true
+      });
+    }
+  });
 }
 
 function initRemainingModule() {
@@ -74,14 +181,29 @@ async function loadRemainingData(date, branch) {
   try {
     await Items.load();
 
+    // 1) فحص وجود أحدث بيانات استلام مسجلة محلياً في الذاكرة لنفس اليوم والفرع
+    const activeRec = (typeof getActiveReceivingData === "function")
+      ? getActiveReceivingData(currentRemainingDate, currentRemainingBranch)
+      : null;
+
     const [receivingData, salesData, remainingData] = await Promise.all([
-      Sync.get("getDay", { date: currentRemainingDate, branch: currentRemainingBranch }, "day:" + currentRemainingDate + ":" + currentRemainingBranch).catch(() => null),
+      (activeRec ? Promise.resolve(activeRec) : Sync.get("getDay", { date: currentRemainingDate, branch: currentRemainingBranch }, "day:" + currentRemainingDate + ":" + currentRemainingBranch, (freshRec) => {
+        if (freshRec && freshRec.items) {
+          cachedReceivingDataForRemaining = freshRec;
+          renderRemainingView(freshRec, cachedSalesDataForRemaining);
+        }
+      }).catch(() => null)),
       Sync.get("getSalesByCategory", { start: currentRemainingDate, end: currentRemainingDate, branch: currentRemainingBranch }, "tabsense:" + currentRemainingDate + ":" + currentRemainingBranch).catch(() => null),
-      Sync.get("getRemainingReport", { date: currentRemainingDate, branch: currentRemainingBranch }, "remaining:" + currentRemainingDate + ":" + currentRemainingBranch).catch(() => null)
+      Sync.get("getRemainingReport", { date: currentRemainingDate, branch: currentRemainingBranch }, "remaining:" + currentRemainingDate + ":" + currentRemainingBranch, (freshRem) => {
+        if (freshRem) {
+          mergeFreshRemainingData(freshRem);
+          renderRemainingView(cachedReceivingDataForRemaining, cachedSalesDataForRemaining);
+        }
+      }).catch(() => null)
     ]);
 
-    cachedReceivingDataForRemaining = receivingData;
-    cachedSalesDataForRemaining = salesData;
+    cachedReceivingDataForRemaining = activeRec || receivingData || cachedReceivingDataForRemaining;
+    cachedSalesDataForRemaining = salesData || cachedSalesDataForRemaining;
 
     currentRemainingData = {};
     currentRemainingMeta = { isClosed: false, closedBy: "", closedAt: "" };
@@ -89,31 +211,10 @@ async function loadRemainingData(date, branch) {
     currentRemainingRemovedIds = new Set();
 
     if (remainingData) {
-      if (remainingData.meta) currentRemainingMeta = remainingData.meta;
-      if (Array.isArray(remainingData.removedItemIds)) {
-        currentRemainingRemovedIds = new Set(remainingData.removedItemIds);
-      }
-      (remainingData.items || []).forEach(it => {
-        currentRemainingData[it.itemId] = {
-          remaining: it.remaining !== undefined && it.remaining !== null ? String(it.remaining) : "",
-          remainingWeight: it.remainingWeight !== undefined && it.remainingWeight !== null ? String(it.remainingWeight) : "",
-          remainingSauce: it.remainingSauce !== undefined && it.remainingSauce !== null ? String(it.remainingSauce) : "",
-          notes: it.notes || ""
-        };
-        // إذا كان صنف إضافي محفوظ سابقاً غير موجود في الأصناف الأساسية
-        if (!Items.byId(it.itemId) && !currentRemainingExtraItems.some(x => x.id === it.itemId)) {
-          currentRemainingExtraItems.push({
-            id: it.itemId,
-            name: it.itemName || it.name || it.itemId,
-            unit: it.unit || "جرام",
-            category: it.category || "عام",
-            isCustom: true
-          });
-        }
-      });
+      mergeFreshRemainingData(remainingData);
     }
 
-    renderRemainingView(receivingData, salesData);
+    renderRemainingView(cachedReceivingDataForRemaining, cachedSalesDataForRemaining);
   } catch (err) {
     console.error("loadRemainingData error:", err);
     renderRemainingView(null, null);
@@ -242,6 +343,7 @@ function renderRemainingView(receivingData, salesData) {
   let grandTotalReceivedWeight = 0;
   let grandTotalSoldMeals = 0;
   let grandTotalActualRemainingWeight = 0;
+  let grandTotalActualSauce = 0;
   let grandTotalWasteGrams = 0;
   let highVarianceCount = 0;
 
@@ -270,7 +372,9 @@ function renderRemainingView(receivingData, salesData) {
 
       const remData = currentRemainingData[it.id] || { remainingWeight: "", remainingSauce: "" };
       const actualWeight = Number(remData.remainingWeight || remData.remaining || 0);
+      const actualSauce = Number(remData.remainingSauce || 0);
       grandTotalActualRemainingWeight += actualWeight;
+      grandTotalActualSauce += actualSauce;
 
       const isCounted = (remData.remainingWeight !== "" && remData.remainingWeight !== null && remData.remainingWeight !== undefined) ||
                         (remData.remainingSauce !== "" && remData.remainingSauce !== null && remData.remainingSauce !== undefined);
@@ -321,7 +425,7 @@ function renderRemainingView(receivingData, salesData) {
         </div>
         ` : `
         <div class="rem-stat-pill">
-          <span class="rem-stat-num">${Math.round(grandTotalActualRemainingWeight)}g</span>
+          <span class="rem-stat-num">${Math.round(grandTotalActualRemainingWeight)}g${grandTotalActualSauce > 0 ? ` | 🥣 ${grandTotalActualSauce}` : ''}</span>
           <span class="rem-stat-lbl">إجمالي المتبقي الفعلي</span>
         </div>
         `}
@@ -365,6 +469,7 @@ function renderRemainingView(receivingData, salesData) {
 
     let catReceivedSum = 0;
     let catActualRemainingSum = 0;
+    let catActualSauceSum = 0;
 
     const cardsHtml = catItems.map(it => {
       const recEntry = receivingMap[it.id] || {};
@@ -375,12 +480,13 @@ function renderRemainingView(receivingData, salesData) {
       const actualWeight = Number(remData.remainingWeight || remData.remaining || 0);
       const actualSauce = Number(remData.remainingSauce || 0);
       catActualRemainingSum += actualWeight;
+      catActualSauceSum += actualSauce;
 
       const isCounted = (remData.remainingWeight !== "" && remData.remainingWeight !== null && remData.remainingWeight !== undefined) ||
                         (remData.remainingSauce !== "" && remData.remainingSauce !== null && remData.remainingSauce !== undefined);
 
       const isProtein = isMealCat || (it.unit && (it.unit.includes("جرام") || it.unit.includes("جم") || it.unit.includes("كجم")));
-      const isSauce = (it.name && it.name.includes("صوص")) || (cat && cat.includes("صوص"));
+      const isSauce = (it.name && it.name.includes("صوص")) || (cat && cat.includes("صوص")) || (it.unit && it.unit.includes("علبة"));
 
       let itemVarianceText = "";
       let hasVariance = false;
@@ -411,9 +517,9 @@ function renderRemainingView(receivingData, salesData) {
               <span class="rem-item-unit">(${it.unit || "جم"})</span>
               ${it.isCustom ? '<span class="badge ok rec-custom-badge">إضافي</span>' : ''}
               <span class="rec-meta-chip rec-req-chip" title="المستلم صباحاً">📦 ${recQty > 0 ? Math.round(recQty) : '—'}</span>
-              ${isProtein ? `
-                <span id="remmeals-${it.id}" class="rec-meta-chip rec-meal-chip">
-                  🍽 ${actualWeight > 0 ? mealsCount(actualWeight) + ' وجبة' : '0 وجبة'}
+              ${(isProtein || isSauce || actualSauce > 0) ? `
+                <span id="remmeals-${it.id}" class="rec-meta-chip rec-meal-chip" style="${(!isProtein && !isSauce && actualSauce === 0) ? 'display:none;' : ''}">
+                  ${formatRemainingItemChip(actualWeight, actualSauce, isProtein, isSauce)}
                 </span>
               ` : ''}
               ${itemVarianceText && !Auth.isBranchStaff() ? `
@@ -480,8 +586,9 @@ function renderRemainingView(receivingData, salesData) {
 
     const filledCount = catItems.filter(it => {
       const rem = currentRemainingData[it.id] || {};
-      const val = rem.remainingWeight || rem.remaining;
-      return val !== "" && val !== null && val !== undefined;
+      const wVal = rem.remainingWeight || rem.remaining;
+      const sVal = rem.remainingSauce;
+      return (wVal !== "" && wVal !== null && wVal !== undefined) || (sVal !== "" && sVal !== null && sVal !== undefined);
     }).length;
 
     const expectedRemainingGrams = isMealCat ? Math.max(0, catReceivedSum - categoryConsumedGrams) : catReceivedSum;
@@ -532,7 +639,7 @@ function renderRemainingView(receivingData, salesData) {
                 💳 مباع: <b>${isMealCat ? `${soldMeals || 0} وجبة` : '—'}</b>
               </span>
               <span class="cat-pill pill-rem" id="cat-pill-rem-${catSafeId}" title="إجمالي المتبقي الفعلي المسجل">
-                🍗 متبقي: <b>${hasRemainingRecorded ? (isMealCat ? `${remMeals} وجبة` : `${Math.round(catActualRemainingSum)} جم`) : '—'}</b>
+                ${formatCategoryRemainingPill(hasRemainingRecorded, remMeals, catActualRemainingSum, catActualSauceSum, isMealCat)}
               </span>
               <span id="cat-pill-var-${catSafeId}">
                 ${varBadgeHtml}
@@ -587,6 +694,7 @@ function updateCategoryHeaderMetrics(itemId) {
 
   let catReceivedSum = 0;
   let catActualRemainingSum = 0;
+  let catActualSauceSum = 0;
   let filledCount = 0;
 
   catItems.forEach(it => {
@@ -594,11 +702,13 @@ function updateCategoryHeaderMetrics(itemId) {
     catReceivedSum += Number(recEntry.received || 0);
 
     const remData = currentRemainingData[it.id] || {};
-    const val = remData.remainingWeight || remData.remaining;
-    if (val !== "" && val !== null && val !== undefined) {
+    const wVal = remData.remainingWeight || remData.remaining;
+    const sVal = remData.remainingSauce;
+    if ((wVal !== "" && wVal !== null && wVal !== undefined) || (sVal !== "" && sVal !== null && sVal !== undefined)) {
       filledCount++;
     }
-    catActualRemainingSum += Number(val || 0);
+    catActualRemainingSum += Number(wVal || 0);
+    catActualSauceSum += Number(sVal || 0);
   });
 
   const countEl = document.getElementById("cat-count-" + catSafeId);
@@ -608,7 +718,7 @@ function updateCategoryHeaderMetrics(itemId) {
   const hasRemainingRecorded = filledCount > 0;
   const remMeals = isMealCat ? (catActualRemainingSum / MEAL_WEIGHT_G).toFixed(1).replace(/\.0$/, "") : null;
   if (remPill) {
-    remPill.innerHTML = `🍗 متبقي: <b>${hasRemainingRecorded ? (isMealCat ? `${remMeals} وجبة` : `${Math.round(catActualRemainingSum)} جم`) : '—'}</b>`;
+    remPill.innerHTML = formatCategoryRemainingPill(hasRemainingRecorded, remMeals, catActualRemainingSum, catActualSauceSum, isMealCat);
   }
 
   const varPillContainer = document.getElementById("cat-pill-var-" + catSafeId);
@@ -643,6 +753,7 @@ function toggleRemainingCategory(cat) {
 function onRemainingBranchChange(branch) {
   Branch.set(branch);
   currentRemainingBranch = branch;
+  if (typeof currentReceivingBranch !== "undefined") currentReceivingBranch = branch;
   loadRemainingData(currentRemainingDate, currentRemainingBranch);
 }
 
@@ -675,14 +786,11 @@ function onRemainingWeightChange(itemId, val) {
   if (card) {
     const isCounted = (val !== "" && val !== null) || ((currentRemainingData[itemId].remainingSauce || "") !== "");
     card.dataset.counted = String(isCounted);
+    const input = card.querySelector(`#remweight-${itemId}`);
+    if (input) input.classList.toggle("border-green", Number(val || 0) > 0);
   }
 
-  const mealEl = document.getElementById("remmeals-" + itemId);
-  if (mealEl) {
-    const num = Number(val || 0);
-    mealEl.textContent = num > 0 ? `🍽 ${mealsCount(num)} وجبة` : '0 وجبة';
-  }
-
+  updateItemRemainingDisplay(itemId);
   updateCategoryHeaderMetrics(itemId);
 
   saveRemainingLocalDebounced();
@@ -717,7 +825,12 @@ function onRemainingSauceChange(itemId, val) {
   if (card) {
     const isCounted = ((currentRemainingData[itemId].remainingWeight || "") !== "") || (val !== "" && val !== null);
     card.dataset.counted = String(isCounted);
+    const input = card.querySelector(`#remsauce-${itemId}`);
+    if (input) input.classList.toggle("border-green", Number(val || 0) > 0);
   }
+
+  updateItemRemainingDisplay(itemId);
+  updateCategoryHeaderMetrics(itemId);
 
   saveRemainingLocalDebounced();
   updateSaveBarRemainingStatus();

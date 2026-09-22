@@ -81,8 +81,23 @@ function setActiveTab(tab) {
   if (tab === "opening") { renderOpeningView(); }
   if (tab === "closing") { renderClosingView(); }
   if (tab === "inspection") { renderInspectionGalleryView(); }
-  if (tab === "receiving") { loadReceivingData(currentReceivingDate, currentReceivingBranch); }
-  if (tab === "remaining") { loadRemainingData(currentRemainingDate, currentRemainingBranch); }
+  if (tab === "receiving") { 
+    if (currentRemainingDate && currentReceivingDate !== currentRemainingDate) {
+      currentReceivingDate = currentRemainingDate;
+      const recDateInp = document.getElementById("receivingDateInput");
+      if (recDateInp) recDateInp.value = currentReceivingDate;
+    }
+    loadReceivingData(currentReceivingDate, currentReceivingBranch); 
+  }
+  if (tab === "remaining") { 
+    if (typeof flushReceivingSave === "function") flushReceivingSave();
+    if (currentReceivingDate && currentRemainingDate !== currentReceivingDate) {
+      currentRemainingDate = currentReceivingDate;
+      const remDateInp = document.getElementById("remainingDateInput");
+      if (remDateInp) remDateInp.value = currentRemainingDate;
+    }
+    loadRemainingData(currentRemainingDate, currentRemainingBranch); 
+  }
   if (tab === "waste") { loadWasteData(currentWasteDate, currentWasteBranch); }
   if (tab === "users") { renderUsersView(); }
   if (tab === "audit") { renderAuditView(); }
@@ -237,6 +252,9 @@ function initReceivingTab() {
     dateEl.value = currentReceivingDate;
     dateEl.addEventListener("change", () => {
       currentReceivingDate = dateEl.value;
+      currentRemainingDate = dateEl.value;
+      const remDateEl = document.getElementById("remainingDateInput");
+      if (remDateEl) remDateEl.value = dateEl.value;
       loadReceivingData(currentReceivingDate, currentReceivingBranch);
     });
   }
@@ -249,6 +267,9 @@ function initRemainingTab() {
     dateEl.value = currentRemainingDate;
     dateEl.addEventListener("change", () => {
       currentRemainingDate = dateEl.value;
+      currentReceivingDate = dateEl.value;
+      const recDateEl = document.getElementById("receivingDateInput");
+      if (recDateEl) recDateEl.value = dateEl.value;
       loadRemainingData(currentRemainingDate, currentRemainingBranch);
     });
   }
