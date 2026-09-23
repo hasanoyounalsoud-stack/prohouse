@@ -186,12 +186,18 @@ Sync.onStatusChange(updateSyncBadge);
 
   const startHold = () => {
     held = false;
-    timer = setTimeout(() => {
+    timer = setTimeout(async () => {
       held = true;
-      if (!confirm("تحديث كامل من السيرفر؟\nبينمسح المحفوظ محلياً وبتنجلب البيانات من جديد.")) return;
+      if (!confirm("تحديث كامل للتطبيق من السيرفر؟\nسيتم مسح الكاش وتحميل أحدث إصدار.")) return;
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        } catch(e) {}
+      }
       const n = Sync.clearReadCache();
-      showToast("انمسح " + n + " عنصر من الكاش — جاري التحديث…");
-      setTimeout(() => location.reload(), 600);
+      showToast("جاري التحديث لأحدث نسخة…");
+      setTimeout(() => location.reload(true), 600);
     }, 900);
   };
   const endHold = () => { clearTimeout(timer); };
@@ -216,10 +222,6 @@ if (location.protocol !== "file:") {
   manifestLink.rel = "manifest";
   manifestLink.href = "manifest.json";
   document.head.appendChild(manifestLink);
-
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW register failed:", e));
-  }
 }
 
 // ---- تسجيل الدخول ----
